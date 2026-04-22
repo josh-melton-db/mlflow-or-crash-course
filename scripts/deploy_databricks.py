@@ -27,23 +27,24 @@ def _bundle_command(
         command.append(resource_key)
     command.extend(["-t", target, "--profile", profile])
     for key, value in variables.items():
-        command.extend(["--var", f"{key}={value}"])
+        if value != "":
+            command.extend(["--var", f"{key}={value}"])
     return command
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deploy the inventory optimization notebook workflow to Databricks.")
+    parser = argparse.ArgumentParser(description="Deploy the public inventory optimization notebook workflow to Databricks.")
     parser.add_argument("--profile", default="azure")
     parser.add_argument("--target", default="azure")
     parser.add_argument("--catalog", default="main")
-    parser.add_argument("--schema", default="or_blog_josh_melton")
+    parser.add_argument("--schema", default="inventory_optimization_blog")
     parser.add_argument(
         "--experiment-name",
-        default="/Users/josh.melton@databricks.com/inventory-optimization-crash-course",
+        default="",
     )
     parser.add_argument(
         "--registered-model-name",
-        default="main.or_blog_josh_melton.inventory_optimizer",
+        default="",
     )
     parser.add_argument("--endpoint-name", default="inventory-optimizer-endpoint")
     parser.add_argument("--scenario-count", default="6")

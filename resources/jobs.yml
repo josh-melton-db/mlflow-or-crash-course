@@ -2,7 +2,7 @@ resources:
   jobs:
     inventory_optimization_crash_course:
       name: "inventory-optimization-crash-course"
-      description: "Run the inventory optimization notebook on serverless, compare solver libraries in MLflow, and optionally deploy the champion."
+      description: "Run the public inventory optimization notebook on serverless, compare solver libraries in MLflow, and optionally deploy the champion."
       tasks:
         - task_key: run_inventory_notebook
           notebook_task:

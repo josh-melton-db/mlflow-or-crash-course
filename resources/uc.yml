@@ -1,13 +1,13 @@
 resources:
   schemas:
-    or_blog_schema:
+    inventory_blog_schema:
       name: ${var.schema}
       catalog_name: ${var.catalog}
-      comment: "Unity Catalog schema for the MLflow OR crash course."
+      comment: "Unity Catalog schema for the public inventory optimization crash course."
 
   registered_models:
     inventory_optimizer:
       name: inventory_optimizer
-      catalog_name: ${resources.schemas.or_blog_schema.catalog_name}
-      schema_name: ${resources.schemas.or_blog_schema.name}
+      catalog_name: ${resources.schemas.inventory_blog_schema.catalog_name}
+      schema_name: ${resources.schemas.inventory_blog_schema.name}
       comment: "Champion inventory replenishment optimizer logged from the notebook with MLflow Models From Code."

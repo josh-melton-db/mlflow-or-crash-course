@@ -2,7 +2,9 @@
 # MAGIC %md
 # MAGIC # MLflow + Inventory Optimization Crash Course
 # MAGIC
-# MAGIC This notebook is a compact, blog-friendly walkthrough for experimenting with operations research on Databricks:
+# MAGIC Use this notebook as the hands-on companion to a blog post about evaluating inventory optimization strategies with MLflow on Databricks.
+# MAGIC
+# MAGIC It walks through a complete public-facing workflow:
 # MAGIC
 # MAGIC 1. Generate synthetic inventory replenishment scenarios for a distribution center.
 # MAGIC 2. Compare `OR-Tools CP-SAT` and `SciPy milp` across multiple solver settings.
@@ -18,7 +20,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("catalog", "main")
-dbutils.widgets.text("schema", "or_blog_josh_melton")
+dbutils.widgets.text("schema", "inventory_optimization_blog")
 dbutils.widgets.text("experiment_name", "")
 dbutils.widgets.text("registered_model_name", "")
 dbutils.widgets.text("endpoint_name", "inventory-optimizer-endpoint")
@@ -46,7 +48,7 @@ from scipy.optimize import Bounds, LinearConstraint, milp
 # COMMAND ----------
 
 catalog = dbutils.widgets.get("catalog").strip() or "main"
-schema = dbutils.widgets.get("schema").strip() or "or_blog_josh_melton"
+schema = dbutils.widgets.get("schema").strip() or "inventory_optimization_blog"
 endpoint_name = dbutils.widgets.get("endpoint_name").strip() or "inventory-optimizer-endpoint"
 scenario_count = max(3, int(dbutils.widgets.get("scenario_count") or "6"))
 seed = int(dbutils.widgets.get("seed") or "7")
@@ -839,11 +841,11 @@ def create_or_update_endpoint(endpoint_name: str, registered_model_name: str, mo
 # MAGIC %md
 # MAGIC ## Example scenario
 # MAGIC
-# MAGIC This smaller scenario is useful in the blog post because it keeps the optimization tables readable.
+# MAGIC Start with a smaller scenario that is easy to explain in prose before moving to the benchmark sweep.
 
 # COMMAND ----------
 
-example_scenario_id = "week_demo"
+example_scenario_id = "retail_dc_week_demo"
 example_sku_df, example_budget, example_storage_capacity = generate_inventory_scenario(
     example_scenario_id,
     sku_count=12,
@@ -854,7 +856,7 @@ example_record, example_solution = solve_with_ortools(
     example_sku_df,
     example_budget,
     example_storage_capacity,
-    config_name="ortools_demo",
+    config_name="ortools_baseline_demo",
     time_limit_s=4.0,
     num_workers=1,
     relative_gap=0.0,
@@ -886,6 +888,8 @@ display(pd.DataFrame([example_record]))
 
 # MAGIC %md
 # MAGIC ## Benchmark solver libraries and parameter settings
+# MAGIC
+# MAGIC The sweep below turns the example into a real experiment: multiple scenario sizes, multiple solver settings, and one MLflow run that makes the trade-offs easy to compare.
 
 # COMMAND ----------
 
@@ -1016,7 +1020,9 @@ with TemporaryDirectory() as temp_dir:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Results
+# MAGIC ## Results and blog-ready outputs
+# MAGIC
+# MAGIC These tables are the core artifacts to reference in a post: the solver comparison, the winning configuration, the registered model version, and the endpoint deployment result.
 
 # COMMAND ----------
 
@@ -1028,7 +1034,7 @@ print(json.dumps(notebook_result, indent=2, sort_keys=True))
 # MAGIC %md
 # MAGIC ## Sample serving payload
 # MAGIC
-# MAGIC Use this JSON body with `databricks serving-endpoints query` once the endpoint is ready.
+# MAGIC Use this JSON body with `databricks serving-endpoints query` once the endpoint is ready, or include it in a blog post as the simplest end-to-end inference example.
 
 # COMMAND ----------
 

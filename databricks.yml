@@ -12,11 +12,11 @@ variables:
   catalog:
     default: "main"
   schema:
-    default: "or_blog_josh_melton"
+    default: "inventory_optimization_blog"
   experiment_name:
-    default: "/Users/josh.melton@databricks.com/inventory-optimization-crash-course"
+    default: ""
   registered_model_name:
-    default: "main.or_blog_josh_melton.inventory_optimizer"
+    default: ""
   endpoint_name:
     default: "inventory-optimizer-endpoint"
   scenario_count:

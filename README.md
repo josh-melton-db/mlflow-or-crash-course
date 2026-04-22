@@ -1,10 +1,14 @@
 ## MLflow OR Crash Course
 
-This repo is now notebook-first on purpose. The main artifact is a single Databricks source notebook:
+This repo is a public companion to a blog post about experimenting with inventory optimization on Databricks with MLflow.
+
+The main artifact is a single Databricks source notebook:
 
 - `notebooks/inventory_optimization_crash_course.py`
 
-That notebook is the crash course. It generates supply-chain-flavored inventory replenishment scenarios, benchmarks multiple OR solver settings, logs everything to MLflow, registers the winner as an MLflow Model From Code, and can optionally deploy the champion to Databricks Model Serving.
+That notebook generates supply-chain-flavored replenishment scenarios, benchmarks multiple OR solver settings, logs the comparison to MLflow, registers the winner as an MLflow Model From Code, and can optionally deploy the champion to Databricks Model Serving.
+
+If you want a ready-made narrative outline to pair with the notebook, start with `BLOG_COMPANION.md`.
 
 ### The example problem
 
@@ -18,7 +22,7 @@ For each SKU, the optimizer decides how many cases to order this week while bala
 - leftover inventory carrying cost
 - stockout penalty
 
-This keeps the math approachable for a medium blog post but makes the example feel like an actual inventory optimization workflow instead of a generic knapsack.
+This keeps the math approachable for a blog post while still feeling like an actual inventory optimization workflow instead of a generic knapsack.
 
 ### What gets compared
 
@@ -35,7 +39,7 @@ The notebook tracks:
 - budget utilization
 - storage utilization
 
-The champion rule is intentionally simple and blog-friendly: maximize feasible ratio, then maximize fill rate, then maximize objective value, then minimize solve time.
+The champion rule is intentionally simple and reader-friendly: maximize feasible ratio, then maximize fill rate, then maximize objective value, then minimize solve time.
 
 ### Why MLflow fits
 
@@ -50,7 +54,8 @@ MLflow handles the experiment tracking, artifact storage, registration, and cust
 
 ### Repo layout
 
-- `notebooks/inventory_optimization_crash_course.py` is the main crash course notebook.
+- `notebooks/inventory_optimization_crash_course.py` is the main tutorial notebook.
+- `BLOG_COMPANION.md` gives a blog-ready narrative arc, screenshot list, and talking points.
 - `resources/` contains the Databricks bundle resources for the Unity Catalog schema, registered model, and serverless notebook job.
 - `scripts/deploy_databricks.py` deploys the bundle and runs the notebook job.
 - `databricks.yml` defines the Azure target and notebook job variables.
@@ -70,8 +75,8 @@ python scripts/deploy_databricks.py \
   --profile azure \
   --target azure \
   --catalog main \
-  --schema or_blog_josh_melton \
-  --registered-model-name main.or_blog_josh_melton.inventory_optimizer \
+  --schema inventory_optimization_blog \
+  --registered-model-name main.inventory_optimization_blog.inventory_optimizer \
   --endpoint-name inventory-optimizer-endpoint \
   --deploy-endpoint true
 ```
@@ -87,7 +92,7 @@ The helper also forces the Databricks bundle `direct` engine so the workflow avo
 
 ### Open the notebook directly
 
-If you want the most blog-like experience, open `notebooks/inventory_optimization_crash_course.py` in Databricks and run it cell by cell. The notebook has widgets for:
+If you want the most direct tutorial experience, open `notebooks/inventory_optimization_crash_course.py` in Databricks and run it cell by cell. The notebook has widgets for:
 
 - `catalog`
 - `schema`
