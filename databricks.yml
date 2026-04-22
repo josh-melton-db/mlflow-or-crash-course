@@ -5,12 +5,6 @@ bundle:
 include:
   - resources/*.yml
 
-artifacts:
-  default:
-    type: whl
-    build: uv build --wheel
-    path: .
-
 experimental:
   skip_name_prefix_for_schema: true
 
@@ -20,13 +14,17 @@ variables:
   schema:
     default: "or_blog_josh_melton"
   experiment_name:
-    default: "/Users/josh.melton@databricks.com/mlflow-or-crash-course"
+    default: "/Users/josh.melton@databricks.com/inventory-optimization-crash-course"
   registered_model_name:
-    default: "main.or_blog_josh_melton.portfolio_optimizer"
+    default: "main.or_blog_josh_melton.inventory_optimizer"
+  endpoint_name:
+    default: "inventory-optimizer-endpoint"
   scenario_count:
     default: "6"
   seed:
     default: "7"
+  deploy_endpoint:
+    default: "true"
 
 targets:
   azure:

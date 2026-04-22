@@ -1,14 +1,9 @@
 # Task Status
 
-- [x] Pick a blog-friendly OR problem and benchmark strategy
-- [x] Scaffold a `uv`-based Python package with dependencies
-- [x] Implement `OR-Tools` and `SciPy milp` solver wrappers
-- [x] Add MLflow benchmark tracking and champion selection
-- [x] Add Models From Code packaging for the champion solver
-- [x] Add focused local tests for the solver and workflow path
-- [x] Add Databricks bundle resources for Unity Catalog bootstrap and the serverless job
-- [x] Add a deployment helper for promoting the champion to a serving endpoint
-- [x] Validate the bundle against the Azure Databricks workspace
-- [x] Run the benchmark job on Databricks serverless
-- [x] Create or update the serving endpoint in the Azure workspace
-- [x] Create the GitHub repository under `josh-melton-db`
+- [x] Reframe the example around inventory replenishment instead of portfolio planning
+- [x] Collapse the crash course into a single Databricks notebook
+- [x] Keep the notebook self-contained for benchmarking, MLflow logging, model registration, and optional serving deployment
+- [x] Convert the Databricks bundle job from a wheel task to a serverless notebook task
+- [ ] Validate the refactored notebook bundle against the Azure Databricks workspace
+- [ ] Re-deploy the updated notebook workflow to the Azure Databricks workspace
+- [ ] Re-run the crash course notebook on serverless with the new inventory example

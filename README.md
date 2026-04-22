@@ -1,118 +1,106 @@
 ## MLflow OR Crash Course
 
-This repo is a compact companion for a Medium-style post about treating an operations research workflow like any other MLflow project:
+This repo is now notebook-first on purpose. The main artifact is a single Databricks source notebook:
 
-1. Define a small optimization problem.
-2. Benchmark multiple solver libraries and parameter settings.
-3. Track the comparison in MLflow.
-4. Pick the champion.
-5. Package the winner as an MLflow Model From Code.
-6. Deploy it to Databricks Model Serving on serverless compute.
+- `notebooks/inventory_optimization_crash_course.py`
 
-The example problem is a capital allocation / project portfolio optimizer. Each candidate project has an expected value, a cost, and an implementation-hours footprint. The model chooses the best subset of projects under budget and capacity constraints.
+That notebook is the crash course. It generates supply-chain-flavored inventory replenishment scenarios, benchmarks multiple OR solver settings, logs everything to MLflow, registers the winner as an MLflow Model From Code, and can optionally deploy the champion to Databricks Model Serving.
+
+### The example problem
+
+The business story is a distribution-center replenishment plan.
+
+For each SKU, the optimizer decides how many cases to order this week while balancing:
+
+- expected demand
+- procurement budget
+- storage capacity
+- leftover inventory carrying cost
+- stockout penalty
+
+This keeps the math approachable for a medium blog post but makes the example feel like an actual inventory optimization workflow instead of a generic knapsack.
 
 ### What gets compared
 
 - `OR-Tools CP-SAT`
 - `SciPy milp` (HiGHS-backed mixed integer programming)
 
-The benchmark logs:
+The notebook tracks:
 
 - average objective value
 - average solve time
 - feasible ratio
 - optimal ratio
-- budget and capacity utilization
+- average fill rate
+- budget utilization
+- storage utilization
 
-The selection rule is intentionally simple and blog-friendly: maximize feasible ratio, then maximize average objective, then maximize optimal ratio, then minimize mean solve time.
+The champion rule is intentionally simple and blog-friendly: maximize feasible ratio, then maximize fill rate, then maximize objective value, then minimize solve time.
 
-### Why MLflow fits here
+### Why MLflow fits
 
-The goal is not to pretend an OR solver is a neural network. The point is that solver experiments still have the same operational questions:
+Inventory optimization experiments still create the same operational questions as ML experiments:
 
-- Which configuration is best?
-- What changed between runs?
+- Which solver configuration is best?
+- Which run produced the best service level and economics?
 - Which version should we promote?
-- How do we serve the winner reliably?
+- How do we serve the recommendation logic reliably?
 
-MLflow gives you one place to track runs, keep artifacts, register the champion, and package a custom inference wrapper using [Models From Code](https://mlflow.org/docs/latest/ml/model/models-from-code/).
+MLflow handles the experiment tracking, artifact storage, registration, and custom inference packaging using [Models From Code](https://mlflow.org/docs/latest/ml/model/models-from-code/).
 
 ### Repo layout
 
-- `src/mlflow_or_crash_course/` contains the optimization logic, MLflow workflow, CLI, and Databricks deployment helpers.
-- `scripts/deploy_databricks.py` deploys the bundle, runs the benchmark job, and updates the serving endpoint.
-- `resources/` contains the Databricks bundle resources for Unity Catalog bootstrap and the serverless job.
-- `tests/` contains focused solver and workflow smoke tests.
+- `notebooks/inventory_optimization_crash_course.py` is the main crash course notebook.
+- `resources/` contains the Databricks bundle resources for the Unity Catalog schema, registered model, and serverless notebook job.
+- `scripts/deploy_databricks.py` deploys the bundle and runs the notebook job.
+- `databricks.yml` defines the Azure target and notebook job variables.
 
-### Local quickstart
+### Run it on Databricks
 
-Create the environment and run tests:
+The project is configured for the `azure` Databricks CLI profile and uses:
 
-```bash
-uv run pytest
-```
+- a serverless notebook job
+- Unity Catalog for model registration
+- Databricks Model Serving for the optional endpoint deployment
 
-Run a local benchmark against a local MLflow file store:
-
-```bash
-uv run mlflow-or-crash-course benchmark \
-  --experiment-name mlflow-or-crash-course-local \
-  --tracking-uri file:./mlruns \
-  --registry-uri "" \
-  --scenario-count 4 \
-  --output-dir build/generated
-```
-
-Print a sample serving payload:
+Deploy and run the notebook workflow:
 
 ```bash
-uv run mlflow-or-crash-course sample-request
-```
-
-### Databricks deployment
-
-This project is already configured for the `azure` Databricks CLI profile and uses:
-
-- a serverless Databricks job for benchmarking and model registration
-- Unity Catalog for the schema and registered model
-- Databricks Model Serving for the final endpoint
-
-Deploy and run the full workflow:
-
-```bash
-uv run python scripts/deploy_databricks.py \
+python scripts/deploy_databricks.py \
   --profile azure \
   --target azure \
   --catalog main \
   --schema or_blog_josh_melton \
-  --registered-model-name main.or_blog_josh_melton.portfolio_optimizer \
-  --endpoint-name portfolio-optimizer-endpoint
+  --registered-model-name main.or_blog_josh_melton.inventory_optimizer \
+  --endpoint-name inventory-optimizer-endpoint \
+  --deploy-endpoint true
 ```
 
-That script does three things:
+That helper does two things:
 
-1. `databricks bundle deploy` to create the schema, registered model, and serverless benchmark job.
-2. `databricks bundle run benchmark_or_solvers` to benchmark the solver configs and register the winning model version in MLflow.
-3. Create or update a Model Serving endpoint that points at the `Champion` model alias.
+1. `databricks bundle deploy` to push the notebook, schema, registered model, and serverless job.
+2. `databricks bundle run inventory_optimization_crash_course` to execute the notebook with the selected parameters.
 
-It also forces the Databricks bundle `direct` engine so the workflow avoids the Terraform download/signature issue currently present with Databricks CLI `0.292.x`.
+The notebook itself performs the benchmark, registers the champion model version, and optionally creates or updates the serving endpoint.
 
-### Served model input shape
+The helper also forces the Databricks bundle `direct` engine so the workflow avoids the Terraform download/signature issue currently present with Databricks CLI `0.292.x`.
 
-The deployed endpoint expects one row per scenario, with list-like fields serialized as JSON:
+### Open the notebook directly
 
-- `scenario_id`
-- `project_ids_json`
-- `values_json`
-- `costs_json`
-- `hours_json`
-- `budget`
-- `capacity`
+If you want the most blog-like experience, open `notebooks/inventory_optimization_crash_course.py` in Databricks and run it cell by cell. The notebook has widgets for:
 
-The output contains the chosen projects, objective value, feasibility flags, and aggregate totals.
+- `catalog`
+- `schema`
+- `experiment_name`
+- `registered_model_name`
+- `endpoint_name`
+- `scenario_count`
+- `seed`
+- `deploy_endpoint`
 
-### Suggested blog outline
+### Suggested blog framing
 
-- Start with the idea that optimization experiments deserve the same rigor as ML experiments.
-- Use the project portfolio problem to compare `OR-Tools` and `SciPy milp`.
-- Show the MLflow run comparison, promote the champion, and finish with the served endpoint.
+- Start from the idea that OR experiments deserve the same lifecycle discipline as ML experiments.
+- Use weekly inventory replenishment as the motivating supply-chain use case.
+- Show how solver settings change fill rate, cost efficiency, and runtime.
+- End with the champion solver packaged as an MLflow model and deployed on Databricks serverless infrastructure.

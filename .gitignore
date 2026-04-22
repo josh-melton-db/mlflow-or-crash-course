@@ -11,6 +11,7 @@ wheels/
 
 # Local run artifacts
 .pytest_cache/
+.databricks/
 mlruns/
 mlflow.db
 .DS_Store
