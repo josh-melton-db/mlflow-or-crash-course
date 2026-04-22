@@ -1,0 +1,29 @@
+resources:
+  jobs:
+    benchmark_or_solvers:
+      name: "mlflow-or-crash-course-benchmark"
+      description: "Run an OR solver benchmark on serverless, log the comparison to MLflow, and register the winning solver."
+      tasks:
+        - task_key: benchmark_solver_libraries
+          python_wheel_task:
+            package_name: mlflow_or_crash_course
+            entry_point: benchmark_job
+            named_parameters:
+              experiment_name: ${var.experiment_name}
+              registered_model_name: ${var.registered_model_name}
+              tracking_uri: "databricks"
+              registry_uri: "databricks-uc"
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              output_dir: "/local_disk0/tmp/mlflow-or-crash-course"
+          environment_key: default
+          timeout_seconds: 3600
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - "../dist/mlflow_or_crash_course-0.1.0-py3-none-any.whl"
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"

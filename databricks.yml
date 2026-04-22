@@ -1,0 +1,36 @@
+bundle:
+  name: mlflow-or-crash-course
+  databricks_cli_version: ">= 0.292.0"
+
+include:
+  - resources/*.yml
+
+artifacts:
+  default:
+    type: whl
+    build: uv build --wheel
+    path: .
+
+experimental:
+  skip_name_prefix_for_schema: true
+
+variables:
+  catalog:
+    default: "main"
+  schema:
+    default: "or_blog_josh_melton"
+  experiment_name:
+    default: "/Users/josh.melton@databricks.com/mlflow-or-crash-course"
+  registered_model_name:
+    default: "main.or_blog_josh_melton.portfolio_optimizer"
+  scenario_count:
+    default: "6"
+  seed:
+    default: "7"
+
+targets:
+  azure:
+    default: true
+    mode: development
+    workspace:
+      profile: azure

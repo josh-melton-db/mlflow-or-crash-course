@@ -1,0 +1,13 @@
+resources:
+  schemas:
+    or_blog_schema:
+      name: ${var.schema}
+      catalog_name: ${var.catalog}
+      comment: "Unity Catalog schema for the MLflow OR crash course."
+
+  registered_models:
+    portfolio_optimizer:
+      name: portfolio_optimizer
+      catalog_name: ${resources.schemas.or_blog_schema.catalog_name}
+      schema_name: ${resources.schemas.or_blog_schema.name}
+      comment: "Champion portfolio optimizer logged with MLflow models-from-code."
