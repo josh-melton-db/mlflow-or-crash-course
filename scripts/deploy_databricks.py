@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from typing import Sequence
 
@@ -10,7 +11,10 @@ from mlflow_or_crash_course.deployment import deploy_serving_endpoint
 
 def _run(command: list[str]) -> None:
     print("$", " ".join(command))
-    subprocess.run(command, check=True)
+    env = os.environ.copy()
+    if command[:2] == ["databricks", "bundle"]:
+        env.setdefault("DATABRICKS_BUNDLE_ENGINE", "direct")
+    subprocess.run(command, check=True, env=env)
 
 
 def _bundle_command(

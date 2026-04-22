@@ -95,6 +95,8 @@ That script does three things:
 2. `databricks bundle run benchmark_or_solvers` to benchmark the solver configs and register the winning model version in MLflow.
 3. Create or update a Model Serving endpoint that points at the `Champion` model alias.
 
+It also forces the Databricks bundle `direct` engine so the workflow avoids the Terraform download/signature issue currently present with Databricks CLI `0.292.x`.
+
 ### Served model input shape
 
 The deployed endpoint expects one row per scenario, with list-like fields serialized as JSON:
