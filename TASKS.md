@@ -11,4 +11,4 @@
 - [x] Validate the bundle against the Azure Databricks workspace
 - [x] Run the benchmark job on Databricks serverless
 - [x] Create or update the serving endpoint in the Azure workspace
-- [ ] Create the GitHub repository under `josh-melton-db`
+- [x] Create the GitHub repository under `josh-melton-db`
