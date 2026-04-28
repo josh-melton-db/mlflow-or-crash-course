@@ -9,14 +9,201 @@ resources:
             notebook_path: ../notebooks/inventory_optimization_crash_course.py
             base_parameters:
               experiment_name: ${var.experiment_name}
-              registered_model_name: ${var.registered_model_name}
+              model_name: ${var.model_name}
               endpoint_name: ${var.endpoint_name}
               catalog: ${var.catalog}
               schema: ${var.schema}
               seed: ${var.seed}
               scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
               deploy_endpoint: ${var.deploy_endpoint}
+              run_large_benchmark: ${var.run_large_benchmark}
+              large_sku_count: ${var.large_sku_count}
+              large_time_limit_s: ${var.large_time_limit_s}
+              large_experiment_name: ${var.large_experiment_name}
+              large_benchmark_id: ${var.large_benchmark_id}
+              run_network_benchmark: ${var.run_network_benchmark}
+              network_product_count: ${var.network_product_count}
+              network_source_count: ${var.network_source_count}
+              network_dc_count: ${var.network_dc_count}
+              network_store_count: ${var.network_store_count}
+              network_sources_per_dc: ${var.network_sources_per_dc}
+              network_dcs_per_store: ${var.network_dcs_per_store}
+              network_time_limit_s: ${var.network_time_limit_s}
+              network_experiment_name: ${var.network_experiment_name}
+              network_benchmark_id: ${var.network_benchmark_id}
           timeout_seconds: 5400
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+    inventory_optimization_cuopt_gpu:
+      name: "inventory-optimization-cuopt-gpu"
+      description: "Run the NVIDIA cuOpt companion notebook on serverless GPU compute and optionally deploy the cuOpt champion to GPU Model Serving."
+      environments:
+        - environment_key: ai_runtime
+          spec:
+            environment_version: ${var.gpu_environment_version}
+      tasks:
+        - task_key: run_cuopt_gpu_notebook
+          notebook_task:
+            notebook_path: ../notebooks/inventory_optimization_cuopt_gpu.py
+            base_parameters:
+              experiment_name: ${var.experiment_name}
+              model_name: ${var.gpu_model_name}
+              endpoint_name: ${var.gpu_endpoint_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
+              deploy_endpoint: ${var.deploy_endpoint}
+              gpu_serving_workload_type: ${var.gpu_serving_workload_type}
+              run_large_benchmark: ${var.run_large_benchmark}
+              large_sku_count: ${var.large_sku_count}
+              large_time_limit_s: ${var.large_time_limit_s}
+              large_experiment_name: ${var.large_experiment_name}
+              large_benchmark_id: ${var.large_benchmark_id}
+              run_network_benchmark: ${var.run_network_benchmark}
+              network_product_count: ${var.network_product_count}
+              network_source_count: ${var.network_source_count}
+              network_dc_count: ${var.network_dc_count}
+              network_store_count: ${var.network_store_count}
+              network_sources_per_dc: ${var.network_sources_per_dc}
+              network_dcs_per_store: ${var.network_dcs_per_store}
+              network_time_limit_s: ${var.network_time_limit_s}
+              network_experiment_name: ${var.network_experiment_name}
+              network_benchmark_id: ${var.network_benchmark_id}
+          environment_key: ai_runtime
+          compute:
+            hardware_accelerator: ${var.gpu_hardware_accelerator}
+          timeout_seconds: 7200
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+    inventory_optimization_large_benchmark:
+      name: "inventory-optimization-large-benchmark"
+      description: "Run one apples-to-apples large inventory optimization benchmark on CPU and GPU, logging comparable MLflow and Delta outputs without deploying endpoints."
+      environments:
+        - environment_key: ai_runtime
+          spec:
+            environment_version: ${var.gpu_environment_version}
+      tasks:
+        - task_key: run_large_cpu_benchmark
+          notebook_task:
+            notebook_path: ../notebooks/inventory_optimization_crash_course.py
+            base_parameters:
+              experiment_name: ${var.experiment_name}
+              model_name: "${var.model_name}_large_benchmark"
+              endpoint_name: ${var.endpoint_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
+              deploy_endpoint: "false"
+              run_large_benchmark: "true"
+              large_sku_count: ${var.large_sku_count}
+              large_time_limit_s: ${var.large_time_limit_s}
+              large_experiment_name: ${var.large_experiment_name}
+              large_benchmark_id: ${var.large_benchmark_id}
+              run_network_benchmark: "false"
+          timeout_seconds: 3600
+        - task_key: run_large_gpu_benchmark
+          depends_on:
+            - task_key: run_large_cpu_benchmark
+          notebook_task:
+            notebook_path: ../notebooks/inventory_optimization_cuopt_gpu.py
+            base_parameters:
+              experiment_name: ${var.experiment_name}
+              model_name: "${var.gpu_model_name}_large_benchmark"
+              endpoint_name: ${var.gpu_endpoint_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
+              deploy_endpoint: "false"
+              gpu_serving_workload_type: ${var.gpu_serving_workload_type}
+              run_large_benchmark: "true"
+              large_sku_count: ${var.large_sku_count}
+              large_time_limit_s: ${var.large_time_limit_s}
+              large_experiment_name: ${var.large_experiment_name}
+              large_benchmark_id: ${var.large_benchmark_id}
+              run_network_benchmark: "false"
+          environment_key: ai_runtime
+          compute:
+            hardware_accelerator: ${var.gpu_hardware_accelerator}
+          timeout_seconds: 3600
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+    inventory_optimization_network_benchmark:
+      name: "inventory-optimization-network-benchmark"
+      description: "Run a large sparse distribution-network benchmark on CPU and GPU to test whether cuOpt is more effective on a GPU-friendly formulation."
+      environments:
+        - environment_key: ai_runtime
+          spec:
+            environment_version: ${var.gpu_environment_version}
+      tasks:
+        - task_key: run_network_cpu_benchmark
+          notebook_task:
+            notebook_path: ../notebooks/inventory_optimization_crash_course.py
+            base_parameters:
+              experiment_name: ${var.experiment_name}
+              model_name: "${var.model_name}_network_benchmark"
+              endpoint_name: ${var.endpoint_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
+              deploy_endpoint: "false"
+              run_large_benchmark: "false"
+              run_network_benchmark: "true"
+              network_product_count: ${var.network_product_count}
+              network_source_count: ${var.network_source_count}
+              network_dc_count: ${var.network_dc_count}
+              network_store_count: ${var.network_store_count}
+              network_sources_per_dc: ${var.network_sources_per_dc}
+              network_dcs_per_store: ${var.network_dcs_per_store}
+              network_time_limit_s: ${var.network_time_limit_s}
+              network_experiment_name: ${var.network_experiment_name}
+              network_benchmark_id: ${var.network_benchmark_id}
+          timeout_seconds: 7200
+        - task_key: run_network_gpu_benchmark
+          depends_on:
+            - task_key: run_network_cpu_benchmark
+          notebook_task:
+            notebook_path: ../notebooks/inventory_optimization_cuopt_gpu.py
+            base_parameters:
+              experiment_name: ${var.experiment_name}
+              model_name: "${var.gpu_model_name}_network_benchmark"
+              endpoint_name: ${var.gpu_endpoint_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              seed: ${var.seed}
+              scenario_count: ${var.scenario_count}
+              small_sku_counts: ${var.small_sku_counts}
+              deploy_endpoint: "false"
+              gpu_serving_workload_type: ${var.gpu_serving_workload_type}
+              run_large_benchmark: "false"
+              run_network_benchmark: "true"
+              network_product_count: ${var.network_product_count}
+              network_source_count: ${var.network_source_count}
+              network_dc_count: ${var.network_dc_count}
+              network_store_count: ${var.network_store_count}
+              network_sources_per_dc: ${var.network_sources_per_dc}
+              network_dcs_per_store: ${var.network_dcs_per_store}
+              network_time_limit_s: ${var.network_time_limit_s}
+              network_experiment_name: ${var.network_experiment_name}
+              network_benchmark_id: ${var.network_benchmark_id}
+          environment_key: ai_runtime
+          compute:
+            hardware_accelerator: ${var.gpu_hardware_accelerator}
+          timeout_seconds: 7200
       permissions:
         - level: CAN_VIEW
           group_name: "users"

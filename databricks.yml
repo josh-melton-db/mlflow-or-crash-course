@@ -10,21 +10,63 @@ experimental:
 
 variables:
   catalog:
-    default: "main"
+    default: "demos"
   schema:
-    default: "inventory_optimization_blog"
+    default: "default"
   experiment_name:
     default: ""
-  registered_model_name:
-    default: ""
+  model_name:
+    default: "inventory_optimization"
   endpoint_name:
     default: "inventory-optimizer-endpoint"
   scenario_count:
     default: "6"
+  small_sku_counts:
+    default: "18;36;54;72"
   seed:
     default: "7"
   deploy_endpoint:
     default: "true"
+  run_large_benchmark:
+    default: "false"
+  large_sku_count:
+    default: "2500"
+  large_time_limit_s:
+    default: "600"
+  large_experiment_name:
+    default: ""
+  large_benchmark_id:
+    default: "inventory_large_default"
+  run_network_benchmark:
+    default: "false"
+  network_product_count:
+    default: "80"
+  network_source_count:
+    default: "12"
+  network_dc_count:
+    default: "80"
+  network_store_count:
+    default: "250"
+  network_sources_per_dc:
+    default: "4"
+  network_dcs_per_store:
+    default: "4"
+  network_time_limit_s:
+    default: "600"
+  network_experiment_name:
+    default: ""
+  network_benchmark_id:
+    default: "network_default"
+  gpu_model_name:
+    default: "inventory_optimization_cuopt"
+  gpu_endpoint_name:
+    default: "inventory-optimizer-cuopt-gpu-endpoint"
+  gpu_serving_workload_type:
+    default: "GPU_SMALL"
+  gpu_hardware_accelerator:
+    default: "GPU_1xA10"
+  gpu_environment_version:
+    default: "4"
 
 targets:
   azure:

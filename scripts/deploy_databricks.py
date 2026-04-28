@@ -33,23 +33,54 @@ def _bundle_command(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deploy the public inventory optimization notebook workflow to Databricks.")
+    parser = argparse.ArgumentParser(description="Deploy an inventory optimization notebook workflow to Databricks.")
     parser.add_argument("--profile", default="azure")
     parser.add_argument("--target", default="azure")
-    parser.add_argument("--catalog", default="main")
-    parser.add_argument("--schema", default="inventory_optimization_blog")
+    parser.add_argument("--catalog", default="demos")
+    parser.add_argument("--schema", default="default")
     parser.add_argument(
         "--experiment-name",
         default="",
     )
     parser.add_argument(
-        "--registered-model-name",
-        default="",
+        "--model-name",
+        default="inventory_optimization",
     )
     parser.add_argument("--endpoint-name", default="inventory-optimizer-endpoint")
+    parser.add_argument("--gpu-model-name", default="inventory_optimization_cuopt")
+    parser.add_argument("--gpu-endpoint-name", default="inventory-optimizer-cuopt-gpu-endpoint")
+    parser.add_argument("--gpu-serving-workload-type", default="GPU_SMALL")
+    parser.add_argument("--gpu-hardware-accelerator", default="GPU_1xA10")
+    parser.add_argument("--gpu-environment-version", default="4")
     parser.add_argument("--scenario-count", default="6")
+    parser.add_argument("--small-sku-counts", default="18;36;54;72")
     parser.add_argument("--seed", default="7")
     parser.add_argument("--deploy-endpoint", choices=["true", "false"], default="true")
+    parser.add_argument("--run-large-benchmark", choices=["true", "false"], default="false")
+    parser.add_argument("--large-sku-count", default="2500")
+    parser.add_argument("--large-time-limit-s", default="600")
+    parser.add_argument("--large-experiment-name", default="")
+    parser.add_argument("--large-benchmark-id", default="inventory_large_default")
+    parser.add_argument("--run-network-benchmark", choices=["true", "false"], default="false")
+    parser.add_argument("--network-product-count", default="80")
+    parser.add_argument("--network-source-count", default="12")
+    parser.add_argument("--network-dc-count", default="80")
+    parser.add_argument("--network-store-count", default="250")
+    parser.add_argument("--network-sources-per-dc", default="4")
+    parser.add_argument("--network-dcs-per-store", default="4")
+    parser.add_argument("--network-time-limit-s", default="600")
+    parser.add_argument("--network-experiment-name", default="")
+    parser.add_argument("--network-benchmark-id", default="network_default")
+    parser.add_argument(
+        "--resource-key",
+        choices=[
+            "inventory_optimization_crash_course",
+            "inventory_optimization_cuopt_gpu",
+            "inventory_optimization_large_benchmark",
+            "inventory_optimization_network_benchmark",
+        ],
+        default="inventory_optimization_crash_course",
+    )
     return parser
 
 
@@ -60,11 +91,32 @@ def main(argv: Sequence[str] | None = None) -> None:
         "catalog": args.catalog,
         "schema": args.schema,
         "experiment_name": args.experiment_name,
-        "registered_model_name": args.registered_model_name,
+        "model_name": args.model_name,
         "endpoint_name": args.endpoint_name,
+        "gpu_model_name": args.gpu_model_name,
+        "gpu_endpoint_name": args.gpu_endpoint_name,
+        "gpu_serving_workload_type": args.gpu_serving_workload_type,
+        "gpu_hardware_accelerator": args.gpu_hardware_accelerator,
+        "gpu_environment_version": args.gpu_environment_version,
         "scenario_count": args.scenario_count,
+        "small_sku_counts": args.small_sku_counts,
         "seed": args.seed,
         "deploy_endpoint": args.deploy_endpoint,
+        "run_large_benchmark": args.run_large_benchmark,
+        "large_sku_count": args.large_sku_count,
+        "large_time_limit_s": args.large_time_limit_s,
+        "large_experiment_name": args.large_experiment_name,
+        "large_benchmark_id": args.large_benchmark_id,
+        "run_network_benchmark": args.run_network_benchmark,
+        "network_product_count": args.network_product_count,
+        "network_source_count": args.network_source_count,
+        "network_dc_count": args.network_dc_count,
+        "network_store_count": args.network_store_count,
+        "network_sources_per_dc": args.network_sources_per_dc,
+        "network_dcs_per_store": args.network_dcs_per_store,
+        "network_time_limit_s": args.network_time_limit_s,
+        "network_experiment_name": args.network_experiment_name,
+        "network_benchmark_id": args.network_benchmark_id,
     }
 
     _run(
@@ -80,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             action="run",
             profile=args.profile,
             target=args.target,
-            resource_key="inventory_optimization_crash_course",
+            resource_key=args.resource_key,
             variables=bundle_vars,
         )
     )

@@ -1,13 +1,13 @@
 resources:
-  schemas:
-    inventory_blog_schema:
-      name: ${var.schema}
-      catalog_name: ${var.catalog}
-      comment: "Unity Catalog schema for the public inventory optimization crash course."
-
   registered_models:
-    inventory_optimizer:
-      name: inventory_optimizer
-      catalog_name: ${resources.schemas.inventory_blog_schema.catalog_name}
-      schema_name: ${resources.schemas.inventory_blog_schema.name}
+    inventory_optimization:
+      name: ${var.model_name}
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
       comment: "Champion inventory replenishment optimizer logged from the notebook with MLflow Models From Code."
+
+    inventory_optimization_cuopt:
+      name: ${var.gpu_model_name}
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
+      comment: "NVIDIA cuOpt inventory replenishment optimizer logged from the serverless GPU notebook with MLflow Models From Code."
