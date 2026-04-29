@@ -4,13 +4,12 @@
 # MAGIC
 # MAGIC This notebook is a tactical guide to OR-ops on Databricks: the MLOps-style lifecycle for optimization models.
 # MAGIC
-# MAGIC 1. Define a scenario-level optimization contract.
+# MAGIC 1. Define a scenario-level optimization contract for the small replenishment example.
 # MAGIC 2. Persist normalized SKU inputs and request snapshots in Unity Catalog.
-# MAGIC 3. Benchmark `OR-Tools CP-SAT` against `SciPy milp` with MLflow.
-# MAGIC 4. Register the winning configuration as an MLflow Model From Code artifact.
-# MAGIC 5. Run Spark-native batch optimization over grouped SKU tables.
-# MAGIC 6. Optionally deploy the same champion to serverless Model Serving.
-# MAGIC 7. Reuse the champion from Python/REST or SQL with `ai_query`.
+# MAGIC 3. Benchmark `OR-Tools CP-SAT` against `SciPy milp` with MLflow and register the winning configuration as a governed model version.
+# MAGIC 4. Optionally run a separate large-scale CPU vs GPU benchmark on a sparse distribution-network LP, logged into its own MLflow experiment alongside the GPU companion notebook.
+# MAGIC 5. Pick the OR-ops access pattern that fits the use case: Spark batch, Model Serving, or SQL `ai_query`.
+# MAGIC 6. Reuse the same governed Champion model from each of those access paths.
 
 # COMMAND ----------
 
@@ -28,20 +27,15 @@ dbutils.widgets.text("small_sku_counts", "18,36,54,72")
 dbutils.widgets.text("seed", "7")
 dbutils.widgets.dropdown("deploy_endpoint", "true", ["true", "false"])
 dbutils.widgets.dropdown("run_large_benchmark", "false", ["true", "false"])
-dbutils.widgets.text("large_sku_count", "2500")
+dbutils.widgets.text("large_product_count", "80")
+dbutils.widgets.text("large_source_count", "12")
+dbutils.widgets.text("large_dc_count", "80")
+dbutils.widgets.text("large_store_count", "250")
+dbutils.widgets.text("large_sources_per_dc", "4")
+dbutils.widgets.text("large_dcs_per_store", "4")
 dbutils.widgets.text("large_time_limit_s", "600")
 dbutils.widgets.text("large_experiment_name", "")
 dbutils.widgets.text("large_benchmark_id", "")
-dbutils.widgets.dropdown("run_network_benchmark", "false", ["true", "false"])
-dbutils.widgets.text("network_product_count", "80")
-dbutils.widgets.text("network_source_count", "12")
-dbutils.widgets.text("network_dc_count", "80")
-dbutils.widgets.text("network_store_count", "250")
-dbutils.widgets.text("network_sources_per_dc", "4")
-dbutils.widgets.text("network_dcs_per_store", "4")
-dbutils.widgets.text("network_time_limit_s", "600")
-dbutils.widgets.text("network_experiment_name", "")
-dbutils.widgets.text("network_benchmark_id", "")
 
 # COMMAND ----------
 
@@ -88,16 +82,13 @@ small_sku_counts = parse_sku_counts(dbutils.widgets.get("small_sku_counts"), [18
 seed = int(dbutils.widgets.get("seed") or "7")
 deploy_endpoint = dbutils.widgets.get("deploy_endpoint").strip().lower() == "true"
 run_large_benchmark = dbutils.widgets.get("run_large_benchmark").strip().lower() == "true"
-large_sku_count = int(dbutils.widgets.get("large_sku_count") or "2500")
+large_product_count = int(dbutils.widgets.get("large_product_count") or "80")
+large_source_count = int(dbutils.widgets.get("large_source_count") or "12")
+large_dc_count = int(dbutils.widgets.get("large_dc_count") or "80")
+large_store_count = int(dbutils.widgets.get("large_store_count") or "250")
+large_sources_per_dc = int(dbutils.widgets.get("large_sources_per_dc") or "4")
+large_dcs_per_store = int(dbutils.widgets.get("large_dcs_per_store") or "4")
 large_time_limit_s = float(dbutils.widgets.get("large_time_limit_s") or "600")
-run_network_benchmark = dbutils.widgets.get("run_network_benchmark").strip().lower() == "true"
-network_product_count = int(dbutils.widgets.get("network_product_count") or "80")
-network_source_count = int(dbutils.widgets.get("network_source_count") or "12")
-network_dc_count = int(dbutils.widgets.get("network_dc_count") or "80")
-network_store_count = int(dbutils.widgets.get("network_store_count") or "250")
-network_sources_per_dc = int(dbutils.widgets.get("network_sources_per_dc") or "4")
-network_dcs_per_store = int(dbutils.widgets.get("network_dcs_per_store") or "4")
-network_time_limit_s = float(dbutils.widgets.get("network_time_limit_s") or "600")
 
 registered_model_name = f"{catalog}.{schema}.{model_name}"
 current_user = spark.sql("SELECT current_user()").first()[0]
@@ -108,28 +99,17 @@ large_experiment_name = (
 )
 large_benchmark_id = (
     dbutils.widgets.get("large_benchmark_id").strip()
-    or f"large_inventory_seed{seed}_{large_sku_count}skus"
-)
-network_experiment_name = (
-    dbutils.widgets.get("network_experiment_name").strip()
-    or f"/Users/{current_user}/inventory-optimization-network-scale"
-)
-network_benchmark_id = (
-    dbutils.widgets.get("network_benchmark_id").strip()
-    or f"network_seed{seed}_{network_product_count}p_{network_dc_count}dc_{network_store_count}stores"
+    or f"network_seed{seed}_{large_product_count}p_{large_dc_count}dc_{large_store_count}stores"
 )
 
 sku_table_name = f"{catalog}.{schema}.inventory_sku_inputs"
 request_table_name = f"{catalog}.{schema}.inventory_scenario_requests"
 scenario_result_table_name = f"{catalog}.{schema}.inventory_optimization_scenario_results"
 recommendation_table_name = f"{catalog}.{schema}.inventory_optimization_recommendations"
-large_sku_table_name = f"{catalog}.{schema}.inventory_large_benchmark_sku_inputs"
+large_input_table_name = f"{catalog}.{schema}.inventory_large_benchmark_inputs"
+large_lane_table_name = f"{catalog}.{schema}.inventory_large_benchmark_lanes"
 large_result_table_name = f"{catalog}.{schema}.inventory_large_benchmark_results"
-large_recommendation_table_name = f"{catalog}.{schema}.inventory_large_benchmark_recommendations"
-network_input_table_name = f"{catalog}.{schema}.inventory_network_benchmark_inputs"
-network_lane_table_name = f"{catalog}.{schema}.inventory_network_benchmark_lanes"
-network_result_table_name = f"{catalog}.{schema}.inventory_network_benchmark_results"
-network_flow_table_name = f"{catalog}.{schema}.inventory_network_benchmark_flows"
+large_flow_table_name = f"{catalog}.{schema}.inventory_large_benchmark_flows"
 
 notebook_workspace_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 workspace_notebook_path = Path(notebook_workspace_path)
@@ -161,10 +141,13 @@ run_context = {
     "endpoint_name": endpoint_name,
     "large_benchmark_id": large_benchmark_id,
     "large_experiment_name": large_experiment_name,
-    "large_recommendation_table_name": large_recommendation_table_name,
+    "large_input_table_name": large_input_table_name,
+    "large_lane_table_name": large_lane_table_name,
     "large_result_table_name": large_result_table_name,
-    "large_sku_count": large_sku_count,
-    "large_sku_table_name": large_sku_table_name,
+    "large_flow_table_name": large_flow_table_name,
+    "large_product_count": large_product_count,
+    "large_dc_count": large_dc_count,
+    "large_store_count": large_store_count,
     "large_time_limit_s": large_time_limit_s,
     "recommendation_table_name": recommendation_table_name,
     "request_table_name": request_table_name,
@@ -677,147 +660,6 @@ def solve_with_scipy(
     )
 
 
-def solve_with_scipy_sparse(
-    scenario_id: str,
-    sku_df: pd.DataFrame,
-    budget: int,
-    storage_capacity: int,
-    *,
-    config_name: str,
-    time_limit_s: float,
-    mip_rel_gap: float,
-    presolve: bool,
-) -> tuple[dict[str, object], pd.DataFrame]:
-    on_hand = sku_df["on_hand_cases"].astype(int).to_numpy()
-    demand = sku_df["forecast_cases"].astype(int).to_numpy()
-    max_order = sku_df["max_order_cases"].astype(int).to_numpy()
-    unit_cost = sku_df["unit_cost"].astype(int).to_numpy()
-    unit_margin = sku_df["unit_margin"].astype(int).to_numpy()
-    holding_cost = sku_df["holding_cost"].astype(int).to_numpy()
-    stockout_penalty = sku_df["stockout_penalty"].astype(int).to_numpy()
-    storage_units = sku_df["storage_units_per_case"].astype(int).to_numpy()
-
-    item_count = len(sku_df)
-    order_offset = 0
-    sell_offset = item_count
-    ending_inventory_offset = item_count * 2
-    shortage_offset = item_count * 3
-    total_vars = item_count * 4
-    total_constraints = item_count * 2 + 2
-
-    coefficients = np.concatenate(
-        [
-            np.zeros(item_count, dtype=float),
-            -unit_margin.astype(float),
-            holding_cost.astype(float),
-            stockout_penalty.astype(float),
-        ]
-    )
-    lower_bounds = np.zeros(total_vars, dtype=float)
-    upper_bounds = np.concatenate(
-        [
-            max_order.astype(float),
-            demand.astype(float),
-            (on_hand + max_order).astype(float),
-            demand.astype(float),
-        ]
-    )
-
-    row_indices: list[int] = []
-    column_indices: list[int] = []
-    values: list[float] = []
-    row_lbs = np.empty(total_constraints, dtype=float)
-    row_ubs = np.empty(total_constraints, dtype=float)
-
-    for index in range(item_count):
-        demand_row = index * 2
-        row_indices.extend([demand_row, demand_row])
-        column_indices.extend([sell_offset + index, shortage_offset + index])
-        values.extend([1.0, 1.0])
-        row_lbs[demand_row] = float(demand[index])
-        row_ubs[demand_row] = float(demand[index])
-
-        inventory_row = demand_row + 1
-        row_indices.extend([inventory_row, inventory_row, inventory_row])
-        column_indices.extend([order_offset + index, sell_offset + index, ending_inventory_offset + index])
-        values.extend([1.0, -1.0, -1.0])
-        row_lbs[inventory_row] = float(-on_hand[index])
-        row_ubs[inventory_row] = float(-on_hand[index])
-
-    budget_row = item_count * 2
-    capacity_row = budget_row + 1
-    for index in range(item_count):
-        row_indices.append(budget_row)
-        column_indices.append(order_offset + index)
-        values.append(float(unit_cost[index]))
-
-        row_indices.append(capacity_row)
-        column_indices.append(order_offset + index)
-        values.append(float(storage_units[index]))
-
-    row_lbs[budget_row] = -np.inf
-    row_ubs[budget_row] = float(budget)
-    row_lbs[capacity_row] = -np.inf
-    row_ubs[capacity_row] = float(storage_capacity)
-
-    constraint_matrix = sparse.coo_matrix(
-        (values, (row_indices, column_indices)),
-        shape=(total_constraints, total_vars),
-        dtype=float,
-    ).tocsr()
-
-    started = perf_counter()
-    result = milp(
-        c=coefficients,
-        integrality=np.ones(total_vars, dtype=int),
-        bounds=Bounds(lower_bounds, upper_bounds),
-        constraints=LinearConstraint(constraint_matrix, row_lbs, row_ubs),
-        options={
-            "time_limit": float(time_limit_s),
-            "mip_rel_gap": float(mip_rel_gap),
-            "presolve": bool(presolve),
-        },
-    )
-    solve_time_ms = (perf_counter() - started) * 1000
-
-    rounded = np.rint(result.x).astype(int) if result.x is not None else np.zeros(total_vars, dtype=int)
-    order_cases = rounded[order_offset:sell_offset]
-    sell_cases = rounded[sell_offset:ending_inventory_offset]
-    ending_inventory = rounded[ending_inventory_offset:shortage_offset]
-    shortage_cases = rounded[shortage_offset:]
-    is_feasible = bool(result.x is not None and int(result.status) in (0, 1))
-
-    status_lookup = {
-        0: "OPTIMAL",
-        1: "LIMIT_REACHED",
-        2: "INFEASIBLE",
-        3: "UNBOUNDED",
-        4: "OTHER",
-    }
-    summary, solution = summarize_solution(
-        scenario_id=scenario_id,
-        sku_df=sku_df,
-        budget=budget,
-        storage_capacity=storage_capacity,
-        library="scipy_milp",
-        config_name=config_name,
-        status=status_lookup.get(result.status, f"STATUS_{result.status}"),
-        solve_time_ms=solve_time_ms,
-        order_cases=order_cases,
-        sell_cases=sell_cases,
-        ending_inventory=ending_inventory,
-        shortage_cases=shortage_cases,
-        is_feasible=is_feasible,
-        is_optimal=result.status == 0,
-    )
-    for attribute in ["mip_gap", "mip_dual_bound", "mip_node_count"]:
-        if hasattr(result, attribute):
-            value = getattr(result, attribute)
-            if value is not None:
-                summary[attribute] = float(value)
-    return summary, solution
-
-
 def benchmark_config(config: dict[str, object], scenarios: list[dict[str, object]]) -> tuple[pd.DataFrame, dict[str, object]]:
     scenario_rows = []
     for scenario in scenarios:
@@ -1017,7 +859,7 @@ def network_input_frame(network: dict[str, object], benchmark_id: str, scenario_
     frame = pd.concat([products, sources, dcs, stores, demand], ignore_index=True, sort=False)
     return frame.assign(
         benchmark_id=benchmark_id,
-        benchmark_mode="large_network_cpu_gpu",
+        benchmark_mode="large_scale_cpu_gpu",
         scenario_id=network["payload"]["scenario_id"],
         scenario_seed=int(scenario_seed),
     )
@@ -1028,7 +870,7 @@ def network_lane_frame(network: dict[str, object], benchmark_id: str, scenario_s
     dc_store = network["dc_store_lanes"].assign(lane_type="dc_to_store")
     return pd.concat([source_dc, dc_store], ignore_index=True, sort=False).assign(
         benchmark_id=benchmark_id,
-        benchmark_mode="large_network_cpu_gpu",
+        benchmark_mode="large_scale_cpu_gpu",
         scenario_id=network["payload"]["scenario_id"],
         scenario_seed=int(scenario_seed),
     )
@@ -1474,7 +1316,7 @@ display(pd.DataFrame([example_record]))
 # MAGIC %md
 # MAGIC ## 4. Define the benchmark sweep
 # MAGIC
-# MAGIC The benchmark below varies both scenario size and solver settings. The goal is not just to find the absolute highest objective, but to see which configuration stays reliable while keeping solve times practical.
+# MAGIC The benchmark below sweeps several scenarios and solver settings against the same replenishment contract. The goal is not just to find the absolute highest objective: pick the configuration that stays feasible across scenarios while keeping solve times practical for the planning cadence.
 
 # COMMAND ----------
 
@@ -1520,13 +1362,15 @@ solver_configs = [
 # MAGIC %md
 # MAGIC ## 5. Run the MLflow experiment and register the champion
 # MAGIC
-# MAGIC This is the core MLflow pattern for OR work. The solver code stays ordinary Python; MLflow adds the system of record around it:
+# MAGIC One MLflow experiment is the shared scoreboard for the same business problem. Different users, agents, and solver libraries can each log a run against the same scenario inputs, and the experiment becomes the single place to compare them, pick a winner, and promote it under governance.
 # MAGIC
-# MAGIC 1. run the solver sweep
-# MAGIC 2. log solver parameters, objective metrics, and scenario-level artifacts
-# MAGIC 3. select a champion using an explicit rule
-# MAGIC 4. register the champion as a governed MLflow model version
-# MAGIC 5. validate the registered model locally before endpoint deployment
+# MAGIC The MLflow pattern for OR work is:
+# MAGIC
+# MAGIC 1. run the solver sweep against the same scenario inputs
+# MAGIC 2. log solver parameters, objective metrics, and scenario-level artifacts so every attempt is comparable later
+# MAGIC 3. select a champion with an explicit rule that the team agrees on
+# MAGIC 4. register that champion as a governed Unity Catalog model version
+# MAGIC 5. validate the registered model locally before exposing it through any access pattern
 
 # COMMAND ----------
 
@@ -1601,66 +1445,58 @@ print(json.dumps(experiment_result, indent=2, sort_keys=True))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5b. Optional large-scale CPU benchmark
+# MAGIC ## 5b. Optional large-scale CPU vs GPU benchmark
 # MAGIC
-# MAGIC The small benchmark above is the production-model selection path. This optional section runs a separate stress experiment on one much larger scenario so CPU and GPU runs can be compared under the same SKU count and time budget. It does not register a model; it appends benchmark outputs to Delta and logs metrics to a separate MLflow experiment.
+# MAGIC The small benchmark above is the production-model selection path; the OR contract there is intentionally compact so the entire flow stays readable.
+# MAGIC
+# MAGIC OR teams also want to know how the same MLflow tracking surface answers a different question: at what scale does it pay off to switch runtimes? This optional section logs a separate stress experiment on a larger, sparse distribution-network LP (product flows from sources to DCs to stores, with source capacity, DC throughput, demand at every store, and shortage penalties). The companion GPU notebook generates the same network shape from the same seed, so the two runs land in the same MLflow experiment and can be compared apples-to-apples.
 
 # COMMAND ----------
 
 large_benchmark_summary = {"enabled": run_large_benchmark}
 
 if run_large_benchmark:
-    large_scenario_id = f"{large_benchmark_id}_{large_sku_count}skus"
     large_scenario_seed = seed + 10_000
-    large_sku_df, large_budget, large_storage_capacity = generate_inventory_scenario(
-        large_scenario_id,
-        large_sku_count,
-        large_scenario_seed,
+    large_scenario_id = (
+        f"{large_benchmark_id}_{large_product_count}p_"
+        f"{large_dc_count}dc_{large_store_count}stores"
     )
-    large_input_frame = scenario_to_sku_table(
-        large_scenario_id,
-        large_sku_df,
-        large_budget,
-        large_storage_capacity,
-    ).assign(
-        benchmark_id=large_benchmark_id,
-        benchmark_mode="large_scale_cpu_gpu",
-        benchmark_role="large_cpu_gpu_input",
-        sku_count=int(large_sku_count),
-        scenario_seed=int(large_scenario_seed),
-        time_limit_s=float(large_time_limit_s),
-    )
-    spark.createDataFrame(large_input_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        large_sku_table_name
+    network = generate_distribution_network_scenario(
+        scenario_id=large_scenario_id,
+        product_count=large_product_count,
+        source_count=large_source_count,
+        dc_count=large_dc_count,
+        store_count=large_store_count,
+        sources_per_dc=large_sources_per_dc,
+        dcs_per_store=large_dcs_per_store,
+        scenario_seed=large_scenario_seed,
+        time_limit_s=large_time_limit_s,
     )
 
-    large_solver_configs = [
-        {
-            "name": "ortools_large_parallel",
-            "library": "ortools_cp_sat",
-            "params": {"time_limit_s": large_time_limit_s, "num_workers": 8, "relative_gap": 0.0},
-        },
-        {
-            "name": "scipy_large_sparse",
-            "library": "scipy_milp",
-            "params": {"time_limit_s": large_time_limit_s, "mip_rel_gap": 0.0, "presolve": True},
-        },
-    ]
+    spark.createDataFrame(
+        network_input_frame(network, large_benchmark_id, large_scenario_seed)
+    ).write.mode("append").option("mergeSchema", "true").saveAsTable(large_input_table_name)
+    spark.createDataFrame(
+        network_lane_frame(network, large_benchmark_id, large_scenario_seed)
+    ).write.mode("append").option("mergeSchema", "true").saveAsTable(large_lane_table_name)
 
     mlflow.set_experiment(large_experiment_name)
-    large_result_rows = []
-    large_recommendation_frames = []
-    large_run_name = f"large_inventory_cpu_{large_benchmark_id}"
+    large_run_name = f"large_distribution_cpu_{large_benchmark_id}"
     with mlflow.start_run(run_name=large_run_name) as large_active_run:
         mlflow.log_params(
             {
                 "benchmark_id": large_benchmark_id,
                 "benchmark_mode": "large_scale_cpu_gpu",
                 "accelerator": "serverless_cpu",
-                "problem_type": "inventory_replenishment",
+                "problem_type": "distribution_network_lp",
                 "scenario_id": large_scenario_id,
-                "sku_count": large_sku_count,
                 "scenario_seed": large_scenario_seed,
+                "product_count": large_product_count,
+                "source_count": large_source_count,
+                "dc_count": large_dc_count,
+                "store_count": large_store_count,
+                "sources_per_dc": large_sources_per_dc,
+                "dcs_per_store": large_dcs_per_store,
                 "time_limit_s": large_time_limit_s,
                 "catalog": catalog,
                 "schema": schema,
@@ -1675,75 +1511,51 @@ if run_large_benchmark:
             }
         )
 
-        for config in large_solver_configs:
-            if config["library"] == "ortools_cp_sat":
-                record, solution = solve_with_ortools(
-                    large_scenario_id,
-                    large_sku_df,
-                    large_budget,
-                    large_storage_capacity,
-                    config_name=config["name"],
-                    **config["params"],
-                )
-            else:
-                record, solution = solve_with_scipy_sparse(
-                    large_scenario_id,
-                    large_sku_df,
-                    large_budget,
-                    large_storage_capacity,
-                    config_name=config["name"],
-                    **config["params"],
-                )
+        large_record, large_flows = solve_network_with_scipy(
+            network,
+            config_name="scipy_network_sparse_lp",
+            time_limit_s=large_time_limit_s,
+            presolve=True,
+        )
+        large_record = {
+            **large_record,
+            "benchmark_id": large_benchmark_id,
+            "benchmark_mode": "large_scale_cpu_gpu",
+            "mlflow_run_id": large_active_run.info.run_id,
+            "scenario_seed": large_scenario_seed,
+            "accelerator": "serverless_cpu",
+        }
+        large_flows = large_flows.assign(
+            benchmark_id=large_benchmark_id,
+            benchmark_mode="large_scale_cpu_gpu",
+            mlflow_run_id=large_active_run.info.run_id,
+            scenario_id=large_scenario_id,
+            library=large_record["library"],
+            config_name=large_record["config_name"],
+            status=large_record["status"],
+            is_feasible=bool(large_record["is_feasible"]),
+            is_optimal=bool(large_record["is_optimal"]),
+            solve_time_ms=float(large_record["solve_time_ms"]),
+            objective_value=float(large_record["objective_value"]),
+            fill_rate=float(large_record["fill_rate"]),
+            accelerator="serverless_cpu",
+        )
 
-            record = {
-                **record,
-                "benchmark_id": large_benchmark_id,
-                "benchmark_mode": "large_scale_cpu_gpu",
-                "mlflow_run_id": large_active_run.info.run_id,
-                "scenario_seed": large_scenario_seed,
-                "sku_count": large_sku_count,
-                "time_limit_s": large_time_limit_s,
-                "accelerator": "serverless_cpu",
-            }
-            large_result_rows.append(record)
-            large_recommendation_frames.append(
-                solution.assign(
-                    benchmark_id=large_benchmark_id,
-                    benchmark_mode="large_scale_cpu_gpu",
-                    mlflow_run_id=large_active_run.info.run_id,
-                    library=record["library"],
-                    config_name=record["config_name"],
-                    status=record["status"],
-                    is_feasible=bool(record["is_feasible"]),
-                    is_optimal=bool(record["is_optimal"]),
-                    solve_time_ms=float(record["solve_time_ms"]),
-                    objective_value=float(record["objective_value"]),
-                    fill_rate=float(record["fill_rate"]),
-                    sku_count=int(large_sku_count),
-                    time_limit_s=float(large_time_limit_s),
-                    accelerator="serverless_cpu",
-                )
-            )
+        with mlflow.start_run(run_name="scipy_network_sparse_lp", nested=True):
+            mlflow.log_param("library", large_record["library"])
+            mlflow.log_param("accelerator", "serverless_cpu")
+            mlflow.log_param("benchmark_id", large_benchmark_id)
+            mlflow.log_param("benchmark_mode", "large_scale_cpu_gpu")
+            mlflow.log_param("time_limit_s", large_time_limit_s)
+            mlflow.log_metrics(finite_mlflow_metric_dict(large_record))
+            mlflow.log_table(pd.DataFrame([large_record]), artifact_file="large_benchmark/cpu_summary.json")
 
-            with mlflow.start_run(run_name=config["name"], nested=True):
-                mlflow.log_param("library", config["library"])
-                mlflow.log_param("accelerator", "serverless_cpu")
-                mlflow.log_param("benchmark_id", large_benchmark_id)
-                mlflow.log_param("benchmark_mode", "large_scale_cpu_gpu")
-                mlflow.log_param("sku_count", large_sku_count)
-                mlflow.log_param("time_limit_s", large_time_limit_s)
-                for key, value in config["params"].items():
-                    mlflow.log_param(f"solver__{key}", value)
-                mlflow.log_metrics(finite_mlflow_metric_dict(record))
-                mlflow.log_table(pd.DataFrame([record]), artifact_file=f"large_benchmark/{config['name']}_summary.json")
-
-    large_results_frame = pd.DataFrame(large_result_rows)
-    large_recommendations_frame = pd.concat(large_recommendation_frames, ignore_index=True)
+    large_results_frame = pd.DataFrame([large_record])
     spark.createDataFrame(large_results_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
         large_result_table_name
     )
-    spark.createDataFrame(large_recommendations_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        large_recommendation_table_name
+    spark.createDataFrame(large_flows).write.mode("append").option("mergeSchema", "true").saveAsTable(
+        large_flow_table_name
     )
     display(large_results_frame)
     large_benchmark_summary = {
@@ -1751,10 +1563,17 @@ if run_large_benchmark:
         "benchmark_id": large_benchmark_id,
         "experiment_name": large_experiment_name,
         "run_id": large_active_run.info.run_id,
-        "sku_count": large_sku_count,
+        "product_count": large_product_count,
+        "source_count": large_source_count,
+        "dc_count": large_dc_count,
+        "store_count": large_store_count,
+        "source_dc_lane_count": int(len(network["source_dc_lanes"])),
+        "dc_store_lane_count": int(len(network["dc_store_lanes"])),
+        "variable_count": int(large_record["variable_count"]),
+        "constraint_count": int(large_record["constraint_count"]),
         "time_limit_s": large_time_limit_s,
         "result_table_name": large_result_table_name,
-        "recommendation_table_name": large_recommendation_table_name,
+        "flow_table_name": large_flow_table_name,
     }
 
 print(json.dumps(large_benchmark_summary, indent=2, sort_keys=True))
@@ -1762,145 +1581,24 @@ print(json.dumps(large_benchmark_summary, indent=2, sort_keys=True))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5c. Optional large network CPU benchmark
+# MAGIC ## 6. Choose the right OR-ops access pattern
 # MAGIC
-# MAGIC The replenishment MILP is intentionally simple and often favors mature CPU solvers. This optional benchmark uses a larger, sparse distribution-network LP instead: product flows move from sources to DCs to stores, with source capacity, DC throughput, product-store demand, and shortage penalties. It is designed to be compared with the GPU companion notebook under the same generated network and time budget.
-
-# COMMAND ----------
-
-network_benchmark_summary = {"enabled": run_network_benchmark}
-
-if run_network_benchmark:
-    network_scenario_seed = seed + 20_000
-    network_scenario_id = (
-        f"{network_benchmark_id}_{network_product_count}p_"
-        f"{network_dc_count}dc_{network_store_count}stores"
-    )
-    network = generate_distribution_network_scenario(
-        scenario_id=network_scenario_id,
-        product_count=network_product_count,
-        source_count=network_source_count,
-        dc_count=network_dc_count,
-        store_count=network_store_count,
-        sources_per_dc=network_sources_per_dc,
-        dcs_per_store=network_dcs_per_store,
-        scenario_seed=network_scenario_seed,
-        time_limit_s=network_time_limit_s,
-    )
-
-    spark.createDataFrame(
-        network_input_frame(network, network_benchmark_id, network_scenario_seed)
-    ).write.mode("append").option("mergeSchema", "true").saveAsTable(network_input_table_name)
-    spark.createDataFrame(
-        network_lane_frame(network, network_benchmark_id, network_scenario_seed)
-    ).write.mode("append").option("mergeSchema", "true").saveAsTable(network_lane_table_name)
-
-    mlflow.set_experiment(network_experiment_name)
-    network_run_name = f"network_distribution_cpu_{network_benchmark_id}"
-    with mlflow.start_run(run_name=network_run_name) as network_active_run:
-        mlflow.log_params(
-            {
-                "benchmark_id": network_benchmark_id,
-                "benchmark_mode": "large_network_cpu_gpu",
-                "accelerator": "serverless_cpu",
-                "problem_type": "distribution_network_lp",
-                "scenario_id": network_scenario_id,
-                "scenario_seed": network_scenario_seed,
-                "product_count": network_product_count,
-                "source_count": network_source_count,
-                "dc_count": network_dc_count,
-                "store_count": network_store_count,
-                "sources_per_dc": network_sources_per_dc,
-                "dcs_per_store": network_dcs_per_store,
-                "time_limit_s": network_time_limit_s,
-                "catalog": catalog,
-                "schema": schema,
-            }
-        )
-        mlflow.set_tags(
-            {
-                "benchmark_id": network_benchmark_id,
-                "benchmark_mode": "large_network_cpu_gpu",
-                "accelerator": "serverless_cpu",
-                "benchmark_scope": "large_network_cpu_gpu_comparison",
-            }
-        )
-
-        network_record, network_flows = solve_network_with_scipy(
-            network,
-            config_name="scipy_network_sparse_lp",
-            time_limit_s=network_time_limit_s,
-            presolve=True,
-        )
-        network_record = {
-            **network_record,
-            "benchmark_id": network_benchmark_id,
-            "benchmark_mode": "large_network_cpu_gpu",
-            "mlflow_run_id": network_active_run.info.run_id,
-            "scenario_seed": network_scenario_seed,
-            "accelerator": "serverless_cpu",
-        }
-        network_flows = network_flows.assign(
-            benchmark_id=network_benchmark_id,
-            benchmark_mode="large_network_cpu_gpu",
-            mlflow_run_id=network_active_run.info.run_id,
-            scenario_id=network_scenario_id,
-            library=network_record["library"],
-            config_name=network_record["config_name"],
-            status=network_record["status"],
-            is_feasible=bool(network_record["is_feasible"]),
-            is_optimal=bool(network_record["is_optimal"]),
-            solve_time_ms=float(network_record["solve_time_ms"]),
-            objective_value=float(network_record["objective_value"]),
-            fill_rate=float(network_record["fill_rate"]),
-            accelerator="serverless_cpu",
-        )
-
-        with mlflow.start_run(run_name="scipy_network_sparse_lp", nested=True):
-            mlflow.log_param("library", network_record["library"])
-            mlflow.log_param("accelerator", "serverless_cpu")
-            mlflow.log_param("benchmark_id", network_benchmark_id)
-            mlflow.log_param("benchmark_mode", "large_network_cpu_gpu")
-            mlflow.log_param("time_limit_s", network_time_limit_s)
-            mlflow.log_metrics(finite_mlflow_metric_dict(network_record))
-            mlflow.log_table(pd.DataFrame([network_record]), artifact_file="network_benchmark/cpu_summary.json")
-
-    network_results_frame = pd.DataFrame([network_record])
-    spark.createDataFrame(network_results_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        network_result_table_name
-    )
-    spark.createDataFrame(network_flows).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        network_flow_table_name
-    )
-    display(network_results_frame)
-    network_benchmark_summary = {
-        "enabled": True,
-        "benchmark_id": network_benchmark_id,
-        "experiment_name": network_experiment_name,
-        "run_id": network_active_run.info.run_id,
-        "product_count": network_product_count,
-        "source_count": network_source_count,
-        "dc_count": network_dc_count,
-        "store_count": network_store_count,
-        "source_dc_lane_count": int(len(network["source_dc_lanes"])),
-        "dc_store_lane_count": int(len(network["dc_store_lanes"])),
-        "variable_count": int(network_record["variable_count"]),
-        "constraint_count": int(network_record["constraint_count"]),
-        "time_limit_s": network_time_limit_s,
-        "result_table_name": network_result_table_name,
-        "flow_table_name": network_flow_table_name,
-    }
-
-print(json.dumps(network_benchmark_summary, indent=2, sort_keys=True))
+# MAGIC The same registered MLflow model supports several access paths. Pick the one that fits the use case before wiring up downstream code; the next sections each implement one of these paths against the same Champion model artifact.
+# MAGIC
+# MAGIC | Pattern | Input shape | Best for |
+# MAGIC | --- | --- | --- |
+# MAGIC | Spark `applyInPandas` | SKU-long table grouped by `scenario_id` | Scheduled batch optimization, Delta outputs, replayable jobs |
+# MAGIC | Model Serving | One JSON request per scenario | Apps, what-if workflows, external integrations |
+# MAGIC | SQL `ai_query` | One array-backed request row per scenario | Analyst workflows and endpoint-backed SQL batch calls |
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Run Spark batch optimization with the Champion model
+# MAGIC ## 7. Run Spark batch optimization with the Champion model
 # MAGIC
-# MAGIC The primary operational path for OR is usually batch: read the latest planning inputs, solve each planning scenario, and write recommendation tables for downstream execution and audit.
+# MAGIC Most OR workloads run on a planning cadence: read the latest inputs, solve every scenario, and write recommendation tables that downstream systems and auditors can consume.
 # MAGIC
-# MAGIC This section uses the same registered MLflow model version as serving, but keeps inference in Spark. Each Spark group is one scenario from the normalized SKU table; the grouped pandas function assembles the request payload, loads the `Champion` model once per Python worker, and emits one recommendation row per SKU.
+# MAGIC The Champion model registered above is the single artifact every access pattern reuses. In Spark, each group is one scenario from the normalized SKU table; the grouped pandas function builds the request payload, loads the `Champion` model once per Python worker, and emits one recommendation row per SKU. Nothing about the optimization logic is duplicated here — it is the same governed model that serving and `ai_query` will hit.
 
 # COMMAND ----------
 
@@ -2136,24 +1834,11 @@ display(spark.table(recommendation_table_name).orderBy("scenario_id", "sku_seque
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Choose the right OR-ops access pattern
-# MAGIC
-# MAGIC The same MLflow model supports multiple access paths. Use Spark batch scoring when the input already lives in Delta and many scenarios need to be solved. Use Model Serving when an app or workflow needs to solve one scenario on demand. Use `ai_query` when SQL users need governed endpoint access from a request-snapshot table.
-# MAGIC
-# MAGIC | Pattern | Input shape | Best for |
-# MAGIC | --- | --- | --- |
-# MAGIC | Spark `applyInPandas` | SKU-long table grouped by `scenario_id` | Scheduled batch optimization, Delta outputs, replayable jobs |
-# MAGIC | Model Serving | One JSON request per scenario | Apps, what-if workflows, external integrations |
-# MAGIC | SQL `ai_query` | One array-backed request row per scenario | Analyst workflows and endpoint-backed SQL batch calls |
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 8. Deploy the champion to Model Serving
 # MAGIC
-# MAGIC This cell is intentionally separate from the experiment so you can rerun deployment without repeating the benchmark.
+# MAGIC Serving is the interactive OR-ops access path. The same Champion model that the Spark batch path just used is exposed behind an HTTP endpoint, so apps and analysts can solve a single scenario on demand without rerunning the benchmark or reloading the artifact.
 # MAGIC
-# MAGIC Serving is the interactive OR-ops path. Creating or updating a serverless Model Serving endpoint can take up to 20 minutes. The Python example below assumes the endpoint is online.
+# MAGIC Creating or updating a serverless Model Serving endpoint can take up to 20 minutes; rerun this cell on its own when you want to refresh the endpoint without rerunning the benchmark.
 
 # COMMAND ----------
 
@@ -2176,7 +1861,6 @@ notebook_result = {
     "batch_result": batch_result,
     "deployment_result": deployment_result,
     "large_benchmark_result": large_benchmark_summary,
-    "network_benchmark_result": network_benchmark_summary,
 }
 print(json.dumps(notebook_result, indent=2, sort_keys=True))
 
@@ -2312,13 +1996,14 @@ else:
 # MAGIC
 # MAGIC The core lifecycle is complete at this point:
 # MAGIC
-# MAGIC - one MLflow experiment with nested runs for each solver configuration
+# MAGIC - one MLflow experiment with nested runs for each solver configuration that any team member or downstream agent can extend with another attempt
 # MAGIC - one ranked comparison table and champion selection rule
 # MAGIC - one Unity Catalog registered model version with the `Champion` alias
 # MAGIC - normalized input and request snapshot tables in Unity Catalog
 # MAGIC - scenario-level and SKU-level optimization output tables
 # MAGIC - one optional serverless serving endpoint
 # MAGIC - Spark batch, Python/REST, and SQL `ai_query` invocation patterns that reuse the same governed model artifact
+# MAGIC - one optional, separate large-scale benchmark experiment for comparing CPU vs GPU runtimes on a sparse distribution-network LP
 
 # COMMAND ----------
 
@@ -2332,7 +2017,6 @@ final_summary = {
     "endpoint_name": deployment_result.get("endpoint_name", endpoint_name),
     "endpoint_action": deployment_result.get("action", "skipped"),
     "large_benchmark_result": large_benchmark_summary,
-    "network_benchmark_result": network_benchmark_summary,
     "recommendation_table_name": recommendation_table_name,
     "request_table_name": request_table_name,
     "scenario_result_table_name": scenario_result_table_name,

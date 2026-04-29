@@ -29,34 +29,24 @@ variables:
     default: "true"
   run_large_benchmark:
     default: "false"
-  large_sku_count:
-    default: "2500"
+  large_product_count:
+    default: "80"
+  large_source_count:
+    default: "12"
+  large_dc_count:
+    default: "80"
+  large_store_count:
+    default: "250"
+  large_sources_per_dc:
+    default: "4"
+  large_dcs_per_store:
+    default: "4"
   large_time_limit_s:
     default: "600"
   large_experiment_name:
     default: ""
   large_benchmark_id:
-    default: "inventory_large_default"
-  run_network_benchmark:
-    default: "false"
-  network_product_count:
-    default: "80"
-  network_source_count:
-    default: "12"
-  network_dc_count:
-    default: "80"
-  network_store_count:
-    default: "250"
-  network_sources_per_dc:
-    default: "4"
-  network_dcs_per_store:
-    default: "4"
-  network_time_limit_s:
-    default: "600"
-  network_experiment_name:
-    default: ""
-  network_benchmark_id:
-    default: "network_default"
+    default: "large_default"
   gpu_model_name:
     default: "inventory_optimization_cuopt"
   gpu_endpoint_name:
@@ -74,3 +64,7 @@ targets:
     mode: development
     workspace:
       profile: azure
+  default:
+    mode: development
+    workspace:
+      profile: DEFAULT

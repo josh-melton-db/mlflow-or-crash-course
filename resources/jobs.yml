@@ -18,20 +18,15 @@ resources:
               small_sku_counts: ${var.small_sku_counts}
               deploy_endpoint: ${var.deploy_endpoint}
               run_large_benchmark: ${var.run_large_benchmark}
-              large_sku_count: ${var.large_sku_count}
+              large_product_count: ${var.large_product_count}
+              large_source_count: ${var.large_source_count}
+              large_dc_count: ${var.large_dc_count}
+              large_store_count: ${var.large_store_count}
+              large_sources_per_dc: ${var.large_sources_per_dc}
+              large_dcs_per_store: ${var.large_dcs_per_store}
               large_time_limit_s: ${var.large_time_limit_s}
               large_experiment_name: ${var.large_experiment_name}
               large_benchmark_id: ${var.large_benchmark_id}
-              run_network_benchmark: ${var.run_network_benchmark}
-              network_product_count: ${var.network_product_count}
-              network_source_count: ${var.network_source_count}
-              network_dc_count: ${var.network_dc_count}
-              network_store_count: ${var.network_store_count}
-              network_sources_per_dc: ${var.network_sources_per_dc}
-              network_dcs_per_store: ${var.network_dcs_per_store}
-              network_time_limit_s: ${var.network_time_limit_s}
-              network_experiment_name: ${var.network_experiment_name}
-              network_benchmark_id: ${var.network_benchmark_id}
           timeout_seconds: 5400
       permissions:
         - level: CAN_VIEW
@@ -60,20 +55,15 @@ resources:
               deploy_endpoint: ${var.deploy_endpoint}
               gpu_serving_workload_type: ${var.gpu_serving_workload_type}
               run_large_benchmark: ${var.run_large_benchmark}
-              large_sku_count: ${var.large_sku_count}
+              large_product_count: ${var.large_product_count}
+              large_source_count: ${var.large_source_count}
+              large_dc_count: ${var.large_dc_count}
+              large_store_count: ${var.large_store_count}
+              large_sources_per_dc: ${var.large_sources_per_dc}
+              large_dcs_per_store: ${var.large_dcs_per_store}
               large_time_limit_s: ${var.large_time_limit_s}
               large_experiment_name: ${var.large_experiment_name}
               large_benchmark_id: ${var.large_benchmark_id}
-              run_network_benchmark: ${var.run_network_benchmark}
-              network_product_count: ${var.network_product_count}
-              network_source_count: ${var.network_source_count}
-              network_dc_count: ${var.network_dc_count}
-              network_store_count: ${var.network_store_count}
-              network_sources_per_dc: ${var.network_sources_per_dc}
-              network_dcs_per_store: ${var.network_dcs_per_store}
-              network_time_limit_s: ${var.network_time_limit_s}
-              network_experiment_name: ${var.network_experiment_name}
-              network_benchmark_id: ${var.network_benchmark_id}
           environment_key: ai_runtime
           compute:
             hardware_accelerator: ${var.gpu_hardware_accelerator}
@@ -84,7 +74,7 @@ resources:
 
     inventory_optimization_large_benchmark:
       name: "inventory-optimization-large-benchmark"
-      description: "Run one apples-to-apples large inventory optimization benchmark on CPU and GPU, logging comparable MLflow and Delta outputs without deploying endpoints."
+      description: "Run the large-scale CPU vs GPU benchmark on a sparse distribution-network LP. Both runtimes log to one shared MLflow experiment so the team can compare cuOpt and SciPy/HiGHS apples-to-apples."
       environments:
         - environment_key: ai_runtime
           spec:
@@ -104,12 +94,16 @@ resources:
               small_sku_counts: ${var.small_sku_counts}
               deploy_endpoint: "false"
               run_large_benchmark: "true"
-              large_sku_count: ${var.large_sku_count}
+              large_product_count: ${var.large_product_count}
+              large_source_count: ${var.large_source_count}
+              large_dc_count: ${var.large_dc_count}
+              large_store_count: ${var.large_store_count}
+              large_sources_per_dc: ${var.large_sources_per_dc}
+              large_dcs_per_store: ${var.large_dcs_per_store}
               large_time_limit_s: ${var.large_time_limit_s}
               large_experiment_name: ${var.large_experiment_name}
               large_benchmark_id: ${var.large_benchmark_id}
-              run_network_benchmark: "false"
-          timeout_seconds: 3600
+          timeout_seconds: 7200
         - task_key: run_large_gpu_benchmark
           depends_on:
             - task_key: run_large_cpu_benchmark
@@ -127,79 +121,15 @@ resources:
               deploy_endpoint: "false"
               gpu_serving_workload_type: ${var.gpu_serving_workload_type}
               run_large_benchmark: "true"
-              large_sku_count: ${var.large_sku_count}
+              large_product_count: ${var.large_product_count}
+              large_source_count: ${var.large_source_count}
+              large_dc_count: ${var.large_dc_count}
+              large_store_count: ${var.large_store_count}
+              large_sources_per_dc: ${var.large_sources_per_dc}
+              large_dcs_per_store: ${var.large_dcs_per_store}
               large_time_limit_s: ${var.large_time_limit_s}
               large_experiment_name: ${var.large_experiment_name}
               large_benchmark_id: ${var.large_benchmark_id}
-              run_network_benchmark: "false"
-          environment_key: ai_runtime
-          compute:
-            hardware_accelerator: ${var.gpu_hardware_accelerator}
-          timeout_seconds: 3600
-      permissions:
-        - level: CAN_VIEW
-          group_name: "users"
-
-    inventory_optimization_network_benchmark:
-      name: "inventory-optimization-network-benchmark"
-      description: "Run a large sparse distribution-network benchmark on CPU and GPU to test whether cuOpt is more effective on a GPU-friendly formulation."
-      environments:
-        - environment_key: ai_runtime
-          spec:
-            environment_version: ${var.gpu_environment_version}
-      tasks:
-        - task_key: run_network_cpu_benchmark
-          notebook_task:
-            notebook_path: ../notebooks/inventory_optimization_crash_course.py
-            base_parameters:
-              experiment_name: ${var.experiment_name}
-              model_name: "${var.model_name}_network_benchmark"
-              endpoint_name: ${var.endpoint_name}
-              catalog: ${var.catalog}
-              schema: ${var.schema}
-              seed: ${var.seed}
-              scenario_count: ${var.scenario_count}
-              small_sku_counts: ${var.small_sku_counts}
-              deploy_endpoint: "false"
-              run_large_benchmark: "false"
-              run_network_benchmark: "true"
-              network_product_count: ${var.network_product_count}
-              network_source_count: ${var.network_source_count}
-              network_dc_count: ${var.network_dc_count}
-              network_store_count: ${var.network_store_count}
-              network_sources_per_dc: ${var.network_sources_per_dc}
-              network_dcs_per_store: ${var.network_dcs_per_store}
-              network_time_limit_s: ${var.network_time_limit_s}
-              network_experiment_name: ${var.network_experiment_name}
-              network_benchmark_id: ${var.network_benchmark_id}
-          timeout_seconds: 7200
-        - task_key: run_network_gpu_benchmark
-          depends_on:
-            - task_key: run_network_cpu_benchmark
-          notebook_task:
-            notebook_path: ../notebooks/inventory_optimization_cuopt_gpu.py
-            base_parameters:
-              experiment_name: ${var.experiment_name}
-              model_name: "${var.gpu_model_name}_network_benchmark"
-              endpoint_name: ${var.gpu_endpoint_name}
-              catalog: ${var.catalog}
-              schema: ${var.schema}
-              seed: ${var.seed}
-              scenario_count: ${var.scenario_count}
-              small_sku_counts: ${var.small_sku_counts}
-              deploy_endpoint: "false"
-              gpu_serving_workload_type: ${var.gpu_serving_workload_type}
-              run_large_benchmark: "false"
-              run_network_benchmark: "true"
-              network_product_count: ${var.network_product_count}
-              network_source_count: ${var.network_source_count}
-              network_dc_count: ${var.network_dc_count}
-              network_store_count: ${var.network_store_count}
-              network_sources_per_dc: ${var.network_sources_per_dc}
-              network_dcs_per_store: ${var.network_dcs_per_store}
-              network_time_limit_s: ${var.network_time_limit_s}
-              network_experiment_name: ${var.network_experiment_name}
-              network_benchmark_id: ${var.network_benchmark_id}
           environment_key: ai_runtime
           compute:
             hardware_accelerator: ${var.gpu_hardware_accelerator}

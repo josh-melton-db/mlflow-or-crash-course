@@ -7,11 +7,11 @@ The main artifacts are Databricks source notebooks:
 - `notebooks/inventory_optimization_crash_course.py`
 - `notebooks/inventory_optimization_cuopt_gpu.py` is the NVIDIA cuOpt companion notebook for Databricks serverless GPU compute.
 
-The CPU notebook generates supply-chain-flavored replenishment scenarios, benchmarks multiple OR solver settings, logs the comparison to MLflow, registers the winner as an MLflow Model From Code, runs Spark-native batch optimization, and can optionally deploy the champion to Databricks Model Serving. Both notebooks also include optional CPU-vs-GPU stress benchmarks for testing solver behavior under a fixed time budget.
+The CPU notebook generates supply-chain-flavored replenishment scenarios, benchmarks multiple OR solver settings, logs the comparison to MLflow, registers the winner as an MLflow Model From Code, runs Spark-native batch optimization, and can optionally deploy the champion to Databricks Model Serving. Both notebooks also include an optional large-scale CPU-vs-GPU benchmark on a sparse distribution-network LP, logged to a separate shared MLflow experiment.
 
 The narrative is intentionally end to end: start with a familiar OR objective function, compare solver libraries with tracked objective and runtime metrics, promote one configuration to a governed model version, then reuse that same artifact from batch Spark, Python/REST, and SQL.
 
-If you want a longer written walkthrough, start with `blog/inventory-optimization-with-mlflow-on-databricks.md`.
+If you want a longer written walkthrough, start with `BLOG_COMPANION.md`.
 
 ### The example problem
 
@@ -47,7 +47,7 @@ The notebook tracks:
 
 The champion rule is intentionally simple and reader-friendly: maximize feasible ratio, then maximize fill rate, then maximize objective value, then minimize solve time.
 
-The small benchmark uses the same SKU counts in the CPU and GPU notebooks by default: `18,36,54,72`. That keeps the introductory comparison focused on solver behavior instead of accidentally comparing different problem sizes.
+The small benchmark uses the same SKU counts (`18;36;54;72`) in the CPU and GPU notebooks. Both notebooks log into one shared MLflow experiment, so different users, agents, and solver libraries can each register their own attempt against the same scenarios and the team can sort by the same metrics to pick a Champion to govern.
 
 ### Why MLflow fits
 
@@ -71,29 +71,21 @@ The important operational choice is not whether the model accepts a row with arr
 
 The repo keeps one MLflow model per runtime family. CPU solvers share `inventory_optimization`; cuOpt uses `inventory_optimization_cuopt` because the dependencies and GPU serving compute are different. Spark batch scoring, Model Serving, and SQL `ai_query` are access paths around those same registered models, not separate model artifacts.
 
-The optional large benchmark is deliberately separate from Champion promotion. It generates one larger scenario, defaults to `2500` SKUs and a `600` second time limit, logs CPU and GPU runs to a large-scale MLflow experiment, and appends comparable outputs to:
+The optional large-scale benchmark is deliberately separate from Champion promotion. Both notebooks generate the same sparse two-echelon distribution-network LP from the same seed (source-to-DC flows, DC-to-store flows, product/store demand, source capacity, DC throughput, and shortage penalties), then solve it on CPU with `SciPy linprog` (HiGHS) and on GPU with `cuOpt PDLP`. Both runs log into one shared MLflow experiment that is separate from the small-replenishment Champion experiment, and both append comparable outputs to:
 
-- `inventory_large_benchmark_sku_inputs`
+- `inventory_large_benchmark_inputs`
+- `inventory_large_benchmark_lanes`
 - `inventory_large_benchmark_results`
-- `inventory_large_benchmark_recommendations`
+- `inventory_large_benchmark_flows`
 
-Use the large benchmark to answer “which runtime finds the best feasible plan under this SLA?” rather than “which small-demo solver should become the governed Champion model?”
-
-The optional network benchmark is a second, more GPU-friendly formulation. It generates a sparse two-echelon distribution network with source-to-DC flows, DC-to-store flows, product/store demand, source capacity, DC throughput, and shortage penalties. It logs CPU `SciPy linprog` and GPU `cuOpt PDLP` runs to a separate experiment and writes comparable outputs to:
-
-- `inventory_network_benchmark_inputs`
-- `inventory_network_benchmark_lanes`
-- `inventory_network_benchmark_results`
-- `inventory_network_benchmark_flows`
-
-Use the network benchmark to test whether cuOpt looks better on a large sparse LP instead of the smaller replenishment MILP.
+Use the large benchmark to answer “does cuOpt make sense on this kind of large sparse LP?” The small replenishment MILP is intentionally CPU-friendly and does not exercise the GPU advantage; the network LP at 80 products / 80 DCs / 250 stores (~125k variables, ~26k constraints) is where cuOpt PDLP starts to substantially outperform CPU sparse LP solvers.
 
 ### Repo layout
 
 - `notebooks/inventory_optimization_crash_course.py` is the main tutorial notebook.
 - `notebooks/model_code/inventory_optimizer_model_template.py` is the checked-in MLflow Models From Code template.
 - `notebooks/model_code/cuopt_inventory_subprocess.py` isolates cuOpt solver execution for GPU notebook and serving runs.
-- `blog/inventory-optimization-with-mlflow-on-databricks.md` gives a longer written walkthrough of the notebook flow.
+- `BLOG_COMPANION.md` gives a longer written walkthrough of the notebook flow.
 - `resources/` contains the Databricks bundle resources for registered models and serverless notebook jobs.
 - `scripts/deploy_databricks.py` deploys the bundle and runs the notebook job.
 - `databricks.yml` defines the Azure target and notebook job variables.
@@ -146,7 +138,7 @@ python scripts/deploy_databricks.py \
 
 The GPU notebook benchmarks only cuOpt configurations, then promotes the best cuOpt run to a separate GPU-oriented registered model and serving endpoint. It follows the working routing accelerator pattern by pinning `cuopt-cu12==25.8.0` with `nvidia-nccl-cu12==2.26.2`, then preloading NCCL before importing cuOpt. cuOpt solves run through `notebooks/model_code/cuopt_inventory_subprocess.py` so a native library abort becomes a readable notebook or serving error instead of a dead kernel.
 
-To run the one-scenario large CPU/GPU benchmark without deploying endpoints:
+To run the large-scale CPU vs GPU benchmark on the sparse distribution-network LP without deploying endpoints:
 
 ```bash
 python scripts/deploy_databricks.py \
@@ -156,29 +148,14 @@ python scripts/deploy_databricks.py \
   --schema default \
   --resource-key inventory_optimization_large_benchmark \
   --deploy-endpoint false \
-  --large-sku-count 2500 \
+  --large-product-count 80 \
+  --large-source-count 12 \
+  --large-dc-count 80 \
+  --large-store-count 250 \
+  --large-sources-per-dc 4 \
+  --large-dcs-per-store 4 \
   --large-time-limit-s 600 \
-  --large-benchmark-id inventory_large_2500
-```
-
-To run the large sparse network CPU/GPU benchmark without deploying endpoints:
-
-```bash
-python scripts/deploy_databricks.py \
-  --profile azure \
-  --target azure \
-  --catalog demos \
-  --schema default \
-  --resource-key inventory_optimization_network_benchmark \
-  --deploy-endpoint false \
-  --network-product-count 80 \
-  --network-source-count 12 \
-  --network-dc-count 80 \
-  --network-store-count 250 \
-  --network-sources-per-dc 4 \
-  --network-dcs-per-store 4 \
-  --network-time-limit-s 600 \
-  --network-benchmark-id network_80p_80dc_250stores
+  --large-benchmark-id large_80p_80dc_250stores
 ```
 
 Both notebooks include two inference paths after deployment:
@@ -203,20 +180,15 @@ If you want the most direct tutorial experience, open `notebooks/inventory_optim
 - `seed`
 - `deploy_endpoint`
 - `run_large_benchmark`
-- `large_sku_count`
+- `large_product_count`
+- `large_source_count`
+- `large_dc_count`
+- `large_store_count`
+- `large_sources_per_dc`
+- `large_dcs_per_store`
 - `large_time_limit_s`
 - `large_experiment_name`
 - `large_benchmark_id`
-- `run_network_benchmark`
-- `network_product_count`
-- `network_source_count`
-- `network_dc_count`
-- `network_store_count`
-- `network_sources_per_dc`
-- `network_dcs_per_store`
-- `network_time_limit_s`
-- `network_experiment_name`
-- `network_benchmark_id`
 
 The cuOpt companion adds:
 

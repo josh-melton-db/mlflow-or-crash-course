@@ -2,13 +2,13 @@
 # MAGIC %md
 # MAGIC # GPU OR-Ops with MLflow + NVIDIA cuOpt
 # MAGIC
-# MAGIC This companion notebook applies the same OR-ops lifecycle as the CPU walkthrough, but runs only the GPU-backed NVIDIA cuOpt MILP solver:
+# MAGIC This companion notebook applies the same OR-ops lifecycle as the CPU walkthrough, but runs the GPU-backed NVIDIA cuOpt solver:
 # MAGIC
-# MAGIC 1. Reuse the same scenario-level replenishment contract.
-# MAGIC 2. Benchmark cuOpt solver settings in MLflow.
-# MAGIC 3. Promote the best cuOpt configuration as an MLflow Model From Code artifact.
-# MAGIC 4. Deploy that artifact to GPU Model Serving for interactive or endpoint-backed SQL access.
-# MAGIC 5. Keep batch GPU guidance explicit: use GPU-compatible workers or persistent actors for in-process batch, otherwise route batch requests through the GPU endpoint.
+# MAGIC 1. Reuse the same scenario-level replenishment contract so cuOpt runs land in the same MLflow experiment as the CPU runs.
+# MAGIC 2. Benchmark cuOpt configurations against the same scenarios used by the CPU notebook.
+# MAGIC 3. Promote the best cuOpt configuration as a separate Unity Catalog model so the GPU and CPU paths each maintain their own Champion alias.
+# MAGIC 4. Optionally run a separate large-scale CPU vs GPU benchmark on a sparse distribution-network LP, logged into its own MLflow experiment alongside the CPU notebook.
+# MAGIC 5. Pick the right GPU OR-ops access pattern, then deploy the cuOpt champion to GPU Model Serving for interactive, endpoint-backed batch, or `ai_query` access.
 # MAGIC
 # MAGIC The notebook is intended for Databricks AI Runtime / serverless GPU jobs.
 
@@ -34,20 +34,15 @@ dbutils.widgets.text("seed", "7")
 dbutils.widgets.dropdown("deploy_endpoint", "true", ["true", "false"])
 dbutils.widgets.dropdown("gpu_serving_workload_type", "GPU_SMALL", ["GPU_SMALL", "GPU_MEDIUM", "GPU_LARGE", "MULTIGPU_MEDIUM"])
 dbutils.widgets.dropdown("run_large_benchmark", "false", ["true", "false"])
-dbutils.widgets.text("large_sku_count", "2500")
+dbutils.widgets.text("large_product_count", "80")
+dbutils.widgets.text("large_source_count", "12")
+dbutils.widgets.text("large_dc_count", "80")
+dbutils.widgets.text("large_store_count", "250")
+dbutils.widgets.text("large_sources_per_dc", "4")
+dbutils.widgets.text("large_dcs_per_store", "4")
 dbutils.widgets.text("large_time_limit_s", "600")
 dbutils.widgets.text("large_experiment_name", "")
 dbutils.widgets.text("large_benchmark_id", "")
-dbutils.widgets.dropdown("run_network_benchmark", "false", ["true", "false"])
-dbutils.widgets.text("network_product_count", "80")
-dbutils.widgets.text("network_source_count", "12")
-dbutils.widgets.text("network_dc_count", "80")
-dbutils.widgets.text("network_store_count", "250")
-dbutils.widgets.text("network_sources_per_dc", "4")
-dbutils.widgets.text("network_dcs_per_store", "4")
-dbutils.widgets.text("network_time_limit_s", "600")
-dbutils.widgets.text("network_experiment_name", "")
-dbutils.widgets.text("network_benchmark_id", "")
 
 # COMMAND ----------
 
@@ -99,16 +94,13 @@ seed = int(dbutils.widgets.get("seed") or "7")
 deploy_endpoint = dbutils.widgets.get("deploy_endpoint").strip().lower() == "true"
 gpu_serving_workload_type = dbutils.widgets.get("gpu_serving_workload_type").strip() or "GPU_SMALL"
 run_large_benchmark = dbutils.widgets.get("run_large_benchmark").strip().lower() == "true"
-large_sku_count = int(dbutils.widgets.get("large_sku_count") or "2500")
+large_product_count = int(dbutils.widgets.get("large_product_count") or "80")
+large_source_count = int(dbutils.widgets.get("large_source_count") or "12")
+large_dc_count = int(dbutils.widgets.get("large_dc_count") or "80")
+large_store_count = int(dbutils.widgets.get("large_store_count") or "250")
+large_sources_per_dc = int(dbutils.widgets.get("large_sources_per_dc") or "4")
+large_dcs_per_store = int(dbutils.widgets.get("large_dcs_per_store") or "4")
 large_time_limit_s = float(dbutils.widgets.get("large_time_limit_s") or "600")
-run_network_benchmark = dbutils.widgets.get("run_network_benchmark").strip().lower() == "true"
-network_product_count = int(dbutils.widgets.get("network_product_count") or "80")
-network_source_count = int(dbutils.widgets.get("network_source_count") or "12")
-network_dc_count = int(dbutils.widgets.get("network_dc_count") or "80")
-network_store_count = int(dbutils.widgets.get("network_store_count") or "250")
-network_sources_per_dc = int(dbutils.widgets.get("network_sources_per_dc") or "4")
-network_dcs_per_store = int(dbutils.widgets.get("network_dcs_per_store") or "4")
-network_time_limit_s = float(dbutils.widgets.get("network_time_limit_s") or "600")
 
 registered_model_name = f"{catalog}.{schema}.{model_name}"
 current_user = spark.sql("SELECT current_user()").first()[0]
@@ -119,26 +111,15 @@ large_experiment_name = (
 )
 large_benchmark_id = (
     dbutils.widgets.get("large_benchmark_id").strip()
-    or f"large_inventory_seed{seed}_{large_sku_count}skus"
-)
-network_experiment_name = (
-    dbutils.widgets.get("network_experiment_name").strip()
-    or f"/Users/{current_user}/inventory-optimization-network-scale"
-)
-network_benchmark_id = (
-    dbutils.widgets.get("network_benchmark_id").strip()
-    or f"network_seed{seed}_{network_product_count}p_{network_dc_count}dc_{network_store_count}stores"
+    or f"network_seed{seed}_{large_product_count}p_{large_dc_count}dc_{large_store_count}stores"
 )
 
 sku_table_name = f"{catalog}.{schema}.inventory_sku_inputs"
 request_table_name = f"{catalog}.{schema}.inventory_scenario_requests"
-large_sku_table_name = f"{catalog}.{schema}.inventory_large_benchmark_sku_inputs"
+large_input_table_name = f"{catalog}.{schema}.inventory_large_benchmark_inputs"
+large_lane_table_name = f"{catalog}.{schema}.inventory_large_benchmark_lanes"
 large_result_table_name = f"{catalog}.{schema}.inventory_large_benchmark_results"
-large_recommendation_table_name = f"{catalog}.{schema}.inventory_large_benchmark_recommendations"
-network_input_table_name = f"{catalog}.{schema}.inventory_network_benchmark_inputs"
-network_lane_table_name = f"{catalog}.{schema}.inventory_network_benchmark_lanes"
-network_result_table_name = f"{catalog}.{schema}.inventory_network_benchmark_results"
-network_flow_table_name = f"{catalog}.{schema}.inventory_network_benchmark_flows"
+large_flow_table_name = f"{catalog}.{schema}.inventory_large_benchmark_flows"
 
 notebook_workspace_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 workspace_notebook_path = Path(notebook_workspace_path)
@@ -184,10 +165,13 @@ run_context = {
     "endpoint_name": endpoint_name,
     "large_benchmark_id": large_benchmark_id,
     "large_experiment_name": large_experiment_name,
-    "large_recommendation_table_name": large_recommendation_table_name,
+    "large_input_table_name": large_input_table_name,
+    "large_lane_table_name": large_lane_table_name,
     "large_result_table_name": large_result_table_name,
-    "large_sku_count": large_sku_count,
-    "large_sku_table_name": large_sku_table_name,
+    "large_flow_table_name": large_flow_table_name,
+    "large_product_count": large_product_count,
+    "large_dc_count": large_dc_count,
+    "large_store_count": large_store_count,
     "large_time_limit_s": large_time_limit_s,
     "request_table_name": request_table_name,
     "run_large_benchmark": run_large_benchmark,
@@ -214,7 +198,7 @@ print(json.dumps(run_context, indent=2, sort_keys=True))
 # MAGIC - shared budget and storage capacity constraints
 # MAGIC - maximize contribution margin minus holding and stockout penalties
 # MAGIC
-# MAGIC Keeping the formulation fixed lets MLflow compare solver behavior instead of comparing two different business problems.
+# MAGIC Within one MLflow experiment, many users, agents, and solver libraries can each log a run against the same business problem. Keeping the OR contract identical across notebooks gives that experiment a uniform scoring surface, so the team can promote a single Champion model under governance no matter which runtime produced it.
 
 # COMMAND ----------
 
@@ -672,7 +656,7 @@ def network_input_frame(network: dict[str, object], benchmark_id: str, scenario_
     frame = pd.concat([products, sources, dcs, stores, demand], ignore_index=True, sort=False)
     return frame.assign(
         benchmark_id=benchmark_id,
-        benchmark_mode="large_network_cpu_gpu",
+        benchmark_mode="large_scale_cpu_gpu",
         scenario_id=network["payload"]["scenario_id"],
         scenario_seed=int(scenario_seed),
     )
@@ -683,7 +667,7 @@ def network_lane_frame(network: dict[str, object], benchmark_id: str, scenario_s
     dc_store = network["dc_store_lanes"].assign(lane_type="dc_to_store")
     return pd.concat([source_dc, dc_store], ignore_index=True, sort=False).assign(
         benchmark_id=benchmark_id,
-        benchmark_mode="large_network_cpu_gpu",
+        benchmark_mode="large_scale_cpu_gpu",
         scenario_id=network["payload"]["scenario_id"],
         scenario_seed=int(scenario_seed),
     )
@@ -911,7 +895,7 @@ def create_or_update_gpu_endpoint(
 # MAGIC %md
 # MAGIC ## 3. Smoke-test cuOpt on the small example
 # MAGIC
-# MAGIC Before the full benchmark, solve the saved example with cuOpt. This confirms the GPU package imported correctly and the inventory constraints are encoded correctly in cuOpt's expression API.
+# MAGIC Before kicking off the full benchmark, solve the same explainable scenario with cuOpt. This is the GPU equivalent of the small solve in the CPU walkthrough — quick to read, easy to compare against the recommended order plan you already know is sensible.
 
 # COMMAND ----------
 
@@ -954,7 +938,7 @@ display(pd.DataFrame([example_record]))
 # MAGIC %md
 # MAGIC ## 4. Define a cuOpt benchmark sweep
 # MAGIC
-# MAGIC This notebook intentionally benchmarks only cuOpt settings. CPU solver comparisons belong in the main walkthrough; the GPU job should stay focused on the solver and dependencies that actually require GPU compute.
+# MAGIC This sweep evaluates cuOpt configurations against the same scenarios the CPU notebook uses, so the runs land in the same MLflow experiment and can be compared side by side. CPU solvers stay in the CPU notebook because their packages and runtime fit standard serverless compute, and cuOpt stays here because it needs GPU compute and CUDA libraries.
 
 # COMMAND ----------
 
@@ -990,7 +974,9 @@ solver_configs = [
 # MAGIC %md
 # MAGIC ## 5. Run the shared MLflow experiment and register the cuOpt champion
 # MAGIC
-# MAGIC This uses the same MLflow pattern as the CPU notebook: run a solver sweep, log objective and runtime metrics, keep scenario-level details as artifacts, and then register a governed model version. The registered model is intentionally cuOpt-specific because the serving dependency and endpoint compute are GPU-specific.
+# MAGIC The cuOpt runs land in the same MLflow experiment as the CPU runs from the main notebook. That gives the team one place to compare every attempt — different libraries, different parameters, different users, different agents — against the same scenarios.
+# MAGIC
+# MAGIC The registered model is its own Unity Catalog model (`inventory_optimization_cuopt`) because cuOpt needs GPU serving compute and an NVIDIA-specific dependency stack. The CPU and GPU walkthroughs each maintain their own Champion alias, so promoting one does not silently overwrite the other.
 
 # COMMAND ----------
 
@@ -1077,59 +1063,60 @@ print(json.dumps(experiment_result, indent=2, sort_keys=True))
 # MAGIC %md
 # MAGIC ## 5b. Optional large-scale cuOpt benchmark
 # MAGIC
-# MAGIC The small benchmark above selects a cuOpt configuration for the governed GPU model. This optional section runs the same large scenario used by the CPU notebook, logs a separate MLflow stress experiment, and appends comparable result and recommendation rows to Delta.
+# MAGIC The small replenishment MILP above is intentionally compact — it is the formulation that gets registered, served, and queried throughout the rest of the notebook.
+# MAGIC
+# MAGIC OR teams running on Databricks usually also want to know: at what problem size does it pay off to switch runtimes? This optional section logs a separate stress experiment on a larger, sparse distribution-network LP and lands those runs in the same MLflow experiment as the CPU companion notebook. Same generated network, same seed, same time budget — both runtimes show up as comparable rows you can sort by solve time and cost. cuOpt PDLP is exercised here because PDLP is the cuOpt solver designed for large sparse LPs.
 
 # COMMAND ----------
 
 large_benchmark_summary = {"enabled": run_large_benchmark}
 
 if run_large_benchmark:
-    large_scenario_id = f"{large_benchmark_id}_{large_sku_count}skus"
     large_scenario_seed = seed + 10_000
-    large_sku_df, large_budget, large_storage_capacity = generate_inventory_scenario(
-        large_scenario_id,
-        large_sku_count,
-        large_scenario_seed,
+    large_scenario_id = (
+        f"{large_benchmark_id}_{large_product_count}p_"
+        f"{large_dc_count}dc_{large_store_count}stores"
     )
-    large_input_frame = scenario_to_sku_table(
-        large_scenario_id,
-        large_sku_df,
-        large_budget,
-        large_storage_capacity,
-    ).assign(
-        benchmark_id=large_benchmark_id,
-        benchmark_mode="large_scale_cpu_gpu",
-        benchmark_role="large_cpu_gpu_input",
-        sku_count=int(large_sku_count),
-        scenario_seed=int(large_scenario_seed),
-        time_limit_s=float(large_time_limit_s),
-    )
-    spark.createDataFrame(large_input_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        large_sku_table_name
+    network = generate_distribution_network_scenario(
+        scenario_id=large_scenario_id,
+        product_count=large_product_count,
+        source_count=large_source_count,
+        dc_count=large_dc_count,
+        store_count=large_store_count,
+        sources_per_dc=large_sources_per_dc,
+        dcs_per_store=large_dcs_per_store,
+        scenario_seed=large_scenario_seed,
+        time_limit_s=large_time_limit_s,
     )
 
-    large_config = {
-        "name": "cuopt_large_gpu",
-        "library": "cuopt_milp",
-        "params": {"time_limit_s": large_time_limit_s},
-    }
+    spark.createDataFrame(
+        network_input_frame(network, large_benchmark_id, large_scenario_seed)
+    ).write.mode("append").option("mergeSchema", "true").saveAsTable(large_input_table_name)
+    spark.createDataFrame(
+        network_lane_frame(network, large_benchmark_id, large_scenario_seed)
+    ).write.mode("append").option("mergeSchema", "true").saveAsTable(large_lane_table_name)
 
     mlflow.set_experiment(large_experiment_name)
-    large_run_name = f"large_inventory_gpu_{large_benchmark_id}"
+    large_run_name = f"large_distribution_cuopt_{large_benchmark_id}"
     with mlflow.start_run(run_name=large_run_name) as large_active_run:
         mlflow.log_params(
             {
                 "benchmark_id": large_benchmark_id,
                 "benchmark_mode": "large_scale_cpu_gpu",
                 "accelerator": "serverless_gpu",
-                "problem_type": "inventory_replenishment",
+                "partner_solver": "nvidia_cuopt",
+                "problem_type": "distribution_network_lp",
                 "scenario_id": large_scenario_id,
-                "sku_count": large_sku_count,
                 "scenario_seed": large_scenario_seed,
+                "product_count": large_product_count,
+                "source_count": large_source_count,
+                "dc_count": large_dc_count,
+                "store_count": large_store_count,
+                "sources_per_dc": large_sources_per_dc,
+                "dcs_per_store": large_dcs_per_store,
                 "time_limit_s": large_time_limit_s,
                 "catalog": catalog,
                 "schema": schema,
-                "cuopt_version": metadata.version("cuopt-cu12"),
             }
         )
         mlflow.set_tags(
@@ -1141,60 +1128,51 @@ if run_large_benchmark:
                 "partner_solver": "nvidia_cuopt",
             }
         )
-        record, solution = solve_with_cuopt(
-            large_scenario_id,
-            large_sku_df,
-            large_budget,
-            large_storage_capacity,
-            config_name=large_config["name"],
-            **large_config["params"],
+
+        large_record, large_flows = solve_network_with_cuopt(
+            network,
+            config_name="cuopt_network_pdlp",
+            time_limit_s=large_time_limit_s,
         )
-        record = {
-            **record,
+        large_record = {
+            **large_record,
             "benchmark_id": large_benchmark_id,
             "benchmark_mode": "large_scale_cpu_gpu",
             "mlflow_run_id": large_active_run.info.run_id,
             "scenario_seed": large_scenario_seed,
-            "sku_count": large_sku_count,
-            "time_limit_s": large_time_limit_s,
             "accelerator": "serverless_gpu",
-            "cuopt_version": metadata.version("cuopt-cu12"),
         }
-        large_recommendations_frame = solution.assign(
+        large_flows = large_flows.assign(
             benchmark_id=large_benchmark_id,
             benchmark_mode="large_scale_cpu_gpu",
             mlflow_run_id=large_active_run.info.run_id,
-            library=record["library"],
-            config_name=record["config_name"],
-            status=record["status"],
-            is_feasible=bool(record["is_feasible"]),
-            is_optimal=bool(record["is_optimal"]),
-            solve_time_ms=float(record["solve_time_ms"]),
-            objective_value=float(record["objective_value"]),
-            fill_rate=float(record["fill_rate"]),
-            sku_count=int(large_sku_count),
-            time_limit_s=float(large_time_limit_s),
+            scenario_id=large_scenario_id,
+            library=large_record["library"],
+            config_name=large_record["config_name"],
+            status=large_record["status"],
+            is_feasible=bool(large_record["is_feasible"]),
+            is_optimal=bool(large_record["is_optimal"]),
+            solve_time_ms=float(large_record["solve_time_ms"]),
+            objective_value=float(large_record["objective_value"]),
+            fill_rate=float(large_record["fill_rate"]),
             accelerator="serverless_gpu",
         )
 
-        with mlflow.start_run(run_name=large_config["name"], nested=True):
-            mlflow.log_param("library", large_config["library"])
+        with mlflow.start_run(run_name="cuopt_network_pdlp", nested=True):
+            mlflow.log_param("library", large_record["library"])
             mlflow.log_param("accelerator", "serverless_gpu")
             mlflow.log_param("benchmark_id", large_benchmark_id)
             mlflow.log_param("benchmark_mode", "large_scale_cpu_gpu")
-            mlflow.log_param("sku_count", large_sku_count)
             mlflow.log_param("time_limit_s", large_time_limit_s)
-            for key, value in large_config["params"].items():
-                mlflow.log_param(f"solver__{key}", value)
-            mlflow.log_metrics(finite_mlflow_metric_dict(record))
-            mlflow.log_table(pd.DataFrame([record]), artifact_file="large_benchmark/cuopt_large_gpu_summary.json")
+            mlflow.log_metrics(finite_mlflow_metric_dict(large_record))
+            mlflow.log_table(pd.DataFrame([large_record]), artifact_file="large_benchmark/gpu_summary.json")
 
-    large_results_frame = pd.DataFrame([record])
+    large_results_frame = pd.DataFrame([large_record])
     spark.createDataFrame(large_results_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
         large_result_table_name
     )
-    spark.createDataFrame(large_recommendations_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        large_recommendation_table_name
+    spark.createDataFrame(large_flows).write.mode("append").option("mergeSchema", "true").saveAsTable(
+        large_flow_table_name
     )
     display(large_results_frame)
     large_benchmark_summary = {
@@ -1202,10 +1180,17 @@ if run_large_benchmark:
         "benchmark_id": large_benchmark_id,
         "experiment_name": large_experiment_name,
         "run_id": large_active_run.info.run_id,
-        "sku_count": large_sku_count,
+        "product_count": large_product_count,
+        "source_count": large_source_count,
+        "dc_count": large_dc_count,
+        "store_count": large_store_count,
+        "source_dc_lane_count": int(len(network["source_dc_lanes"])),
+        "dc_store_lane_count": int(len(network["dc_store_lanes"])),
+        "variable_count": int(large_record["variable_count"]),
+        "constraint_count": int(large_record["constraint_count"]),
         "time_limit_s": large_time_limit_s,
         "result_table_name": large_result_table_name,
-        "recommendation_table_name": large_recommendation_table_name,
+        "flow_table_name": large_flow_table_name,
     }
 
 print(json.dumps(large_benchmark_summary, indent=2, sort_keys=True))
@@ -1213,144 +1198,9 @@ print(json.dumps(large_benchmark_summary, indent=2, sort_keys=True))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5c. Optional large network cuOpt benchmark
-# MAGIC
-# MAGIC The replenishment MILP is useful for governance and serving patterns, but a large sparse distribution-network LP is a better fit for GPU acceleration. This optional section generates the same network shape as the CPU notebook and solves it with cuOpt PDLP.
-
-# COMMAND ----------
-
-network_benchmark_summary = {"enabled": run_network_benchmark}
-
-if run_network_benchmark:
-    network_scenario_seed = seed + 20_000
-    network_scenario_id = (
-        f"{network_benchmark_id}_{network_product_count}p_"
-        f"{network_dc_count}dc_{network_store_count}stores"
-    )
-    network = generate_distribution_network_scenario(
-        scenario_id=network_scenario_id,
-        product_count=network_product_count,
-        source_count=network_source_count,
-        dc_count=network_dc_count,
-        store_count=network_store_count,
-        sources_per_dc=network_sources_per_dc,
-        dcs_per_store=network_dcs_per_store,
-        scenario_seed=network_scenario_seed,
-        time_limit_s=network_time_limit_s,
-    )
-
-    spark.createDataFrame(
-        network_input_frame(network, network_benchmark_id, network_scenario_seed)
-    ).write.mode("append").option("mergeSchema", "true").saveAsTable(network_input_table_name)
-    spark.createDataFrame(
-        network_lane_frame(network, network_benchmark_id, network_scenario_seed)
-    ).write.mode("append").option("mergeSchema", "true").saveAsTable(network_lane_table_name)
-
-    mlflow.set_experiment(network_experiment_name)
-    network_run_name = f"network_distribution_cuopt_{network_benchmark_id}"
-    with mlflow.start_run(run_name=network_run_name) as network_active_run:
-        mlflow.log_params(
-            {
-                "benchmark_id": network_benchmark_id,
-                "benchmark_mode": "large_network_cpu_gpu",
-                "accelerator": "serverless_gpu",
-                "partner_solver": "nvidia_cuopt",
-                "problem_type": "distribution_network_lp",
-                "scenario_id": network_scenario_id,
-                "scenario_seed": network_scenario_seed,
-                "product_count": network_product_count,
-                "source_count": network_source_count,
-                "dc_count": network_dc_count,
-                "store_count": network_store_count,
-                "sources_per_dc": network_sources_per_dc,
-                "dcs_per_store": network_dcs_per_store,
-                "time_limit_s": network_time_limit_s,
-                "catalog": catalog,
-                "schema": schema,
-            }
-        )
-        mlflow.set_tags(
-            {
-                "benchmark_id": network_benchmark_id,
-                "benchmark_mode": "large_network_cpu_gpu",
-                "accelerator": "serverless_gpu",
-                "benchmark_scope": "large_network_cpu_gpu_comparison",
-                "partner_solver": "nvidia_cuopt",
-            }
-        )
-
-        network_record, network_flows = solve_network_with_cuopt(
-            network,
-            config_name="cuopt_network_pdlp",
-            time_limit_s=network_time_limit_s,
-        )
-        network_record = {
-            **network_record,
-            "benchmark_id": network_benchmark_id,
-            "benchmark_mode": "large_network_cpu_gpu",
-            "mlflow_run_id": network_active_run.info.run_id,
-            "scenario_seed": network_scenario_seed,
-            "accelerator": "serverless_gpu",
-        }
-        network_flows = network_flows.assign(
-            benchmark_id=network_benchmark_id,
-            benchmark_mode="large_network_cpu_gpu",
-            mlflow_run_id=network_active_run.info.run_id,
-            scenario_id=network_scenario_id,
-            library=network_record["library"],
-            config_name=network_record["config_name"],
-            status=network_record["status"],
-            is_feasible=bool(network_record["is_feasible"]),
-            is_optimal=bool(network_record["is_optimal"]),
-            solve_time_ms=float(network_record["solve_time_ms"]),
-            objective_value=float(network_record["objective_value"]),
-            fill_rate=float(network_record["fill_rate"]),
-            accelerator="serverless_gpu",
-        )
-
-        with mlflow.start_run(run_name="cuopt_network_pdlp", nested=True):
-            mlflow.log_param("library", network_record["library"])
-            mlflow.log_param("accelerator", "serverless_gpu")
-            mlflow.log_param("benchmark_id", network_benchmark_id)
-            mlflow.log_param("benchmark_mode", "large_network_cpu_gpu")
-            mlflow.log_param("time_limit_s", network_time_limit_s)
-            mlflow.log_metrics(finite_mlflow_metric_dict(network_record))
-            mlflow.log_table(pd.DataFrame([network_record]), artifact_file="network_benchmark/gpu_summary.json")
-
-    network_results_frame = pd.DataFrame([network_record])
-    spark.createDataFrame(network_results_frame).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        network_result_table_name
-    )
-    spark.createDataFrame(network_flows).write.mode("append").option("mergeSchema", "true").saveAsTable(
-        network_flow_table_name
-    )
-    display(network_results_frame)
-    network_benchmark_summary = {
-        "enabled": True,
-        "benchmark_id": network_benchmark_id,
-        "experiment_name": network_experiment_name,
-        "run_id": network_active_run.info.run_id,
-        "product_count": network_product_count,
-        "source_count": network_source_count,
-        "dc_count": network_dc_count,
-        "store_count": network_store_count,
-        "source_dc_lane_count": int(len(network["source_dc_lanes"])),
-        "dc_store_lane_count": int(len(network["dc_store_lanes"])),
-        "variable_count": int(network_record["variable_count"]),
-        "constraint_count": int(network_record["constraint_count"]),
-        "time_limit_s": network_time_limit_s,
-        "result_table_name": network_result_table_name,
-        "flow_table_name": network_flow_table_name,
-    }
-
-print(json.dumps(network_benchmark_summary, indent=2, sort_keys=True))
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 6. Choose the right GPU OR-ops access pattern
 # MAGIC
-# MAGIC The registered cuOpt model has the same scenario request contract as the main optimizer, but the runtime choice matters more because cuOpt depends on CUDA libraries and GPU hardware.
+# MAGIC The registered cuOpt model takes the same scenario request as the CPU optimizer, but the right access pattern looks different on GPUs because cuOpt depends on CUDA libraries and GPU hardware. Pick one before wiring up downstream code; the rest of this notebook implements the GPU Model Serving path against this same Champion model artifact.
 # MAGIC
 # MAGIC | Pattern | Best for | GPU note |
 # MAGIC | --- | --- | --- |
@@ -1358,16 +1208,16 @@ print(json.dumps(network_benchmark_summary, indent=2, sort_keys=True))
 # MAGIC | Ray or persistent GPU actors | High-throughput batch solving where each worker can keep a CUDA context warm | Prefer this over launching a fresh cuOpt process per small group |
 # MAGIC | Spark `applyInPandas` on standard CPU/serverless workers | CPU solvers only | Do not use this path for cuOpt unless the Spark workers are GPU-compatible and have the cuOpt environment |
 # MAGIC
-# MAGIC The helper script remains packaged with the MLflow model so native cuOpt failures stay isolated from the notebook kernel and serving worker. The model template resolves the helper from the logged `code_paths` before launching the subprocess.
+# MAGIC A small helper script ships with the MLflow model so native cuOpt failures surface as readable Python errors instead of crashing the notebook or serving worker.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 7. Deploy the cuOpt champion to GPU Model Serving
 # MAGIC
-# MAGIC This uses the same Databricks Model Serving API as the CPU notebook, with one important difference: the served entity sets `workload_type` to a GPU workload such as `GPU_SMALL`.
+# MAGIC GPU Model Serving is the interactive OR-ops access path for cuOpt. The same Champion model the team just promoted is exposed behind an HTTP endpoint, so apps and analysts can solve a single scenario on demand without rerunning the benchmark or reloading the artifact.
 # MAGIC
-# MAGIC GPU Model Serving is the interactive OR-ops path for cuOpt. Endpoint creation or update can take 30 minutes or more on a cold path, and package installation now depends on NVIDIA's Python package index.
+# MAGIC The deployment uses the same Databricks Model Serving API as the CPU walkthrough, with one important difference: the served entity sets `workload_type` to a GPU workload such as `GPU_SMALL`. Endpoint creation or update can take 30 minutes or more on a cold path because package installation pulls cuOpt from NVIDIA's Python package index.
 
 # COMMAND ----------
 
@@ -1390,7 +1240,6 @@ notebook_result = {
     **experiment_result,
     "deployment_result": deployment_result,
     "large_benchmark_result": large_benchmark_summary,
-    "network_benchmark_result": network_benchmark_summary,
 }
 print(json.dumps(notebook_result, indent=2, sort_keys=True))
 
@@ -1399,7 +1248,7 @@ print(json.dumps(notebook_result, indent=2, sort_keys=True))
 # MAGIC %md
 # MAGIC ## 8. Review cuOpt results and the promoted model
 # MAGIC
-# MAGIC The full table compares cuOpt configurations only. The promoted model is the best cuOpt row because this companion notebook is specifically validating the GPU path.
+# MAGIC The summary tables compare cuOpt configurations against the same scenarios the CPU notebook used. The promoted model is the best cuOpt row because this notebook governs the GPU access path; the CPU walkthrough governs its own Champion alias under a separate registered model so both runtimes can coexist.
 
 # COMMAND ----------
 
@@ -1522,14 +1371,16 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. What changes for cuOpt and GPUs
+# MAGIC ## 11. Operating cuOpt on Databricks
 # MAGIC
-# MAGIC - The notebook must run on AI Runtime / serverless GPU compute, not standard serverless notebook compute.
-# MAGIC - `cuopt-cu12` is installed from `https://pypi.nvidia.com`, and the logged MLflow model requirements include that extra index.
-# MAGIC - cuOpt solves run through a small helper script in `notebooks/model_code/cuopt_inventory_subprocess.py`. The logged model resolves that helper from `code_paths` and launches it as a subprocess so native `libcuopt` aborts become readable Python errors.
-# MAGIC - The GPU benchmark is cuOpt-only. CPU solver comparisons live in the CPU notebook.
-# MAGIC - GPU Model Serving requires `workload_type`, for example `GPU_SMALL`, on the served entity.
-# MAGIC - The registered model defaults to `inventory_optimization_cuopt` so the CPU and GPU walkthroughs do not overwrite each other's Champion aliases.
+# MAGIC A few things to keep in mind once this notebook is part of a real workflow:
+# MAGIC
+# MAGIC - Run it on AI Runtime / serverless GPU compute. Standard serverless notebook compute will not have GPUs available.
+# MAGIC - The cuOpt package comes from `https://pypi.nvidia.com`. Both the notebook install and the logged MLflow model requirements include that extra index, so serving can install the same versions.
+# MAGIC - cuOpt solves go through a small helper script (`notebooks/model_code/cuopt_inventory_subprocess.py`) that the MLflow model carries along. If `libcuopt` ever aborts, this surfaces as a readable Python error instead of a dead notebook kernel or serving worker.
+# MAGIC - GPU Model Serving needs `workload_type` set on the served entity, for example `GPU_SMALL`.
+# MAGIC - The CPU and GPU walkthroughs each register their own Champion model (`inventory_optimization` vs `inventory_optimization_cuopt`) so promoting one runtime never silently overwrites the other.
+# MAGIC - For comparing CPU vs GPU at scale, run the optional large-scale benchmark in section 5b on both notebooks. Both CPU and GPU runs land in the same dedicated MLflow experiment and write comparable rows to the same Delta tables.
 
 # COMMAND ----------
 

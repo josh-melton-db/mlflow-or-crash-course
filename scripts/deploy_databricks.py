@@ -57,27 +57,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", default="7")
     parser.add_argument("--deploy-endpoint", choices=["true", "false"], default="true")
     parser.add_argument("--run-large-benchmark", choices=["true", "false"], default="false")
-    parser.add_argument("--large-sku-count", default="2500")
+    parser.add_argument("--large-product-count", default="80")
+    parser.add_argument("--large-source-count", default="12")
+    parser.add_argument("--large-dc-count", default="80")
+    parser.add_argument("--large-store-count", default="250")
+    parser.add_argument("--large-sources-per-dc", default="4")
+    parser.add_argument("--large-dcs-per-store", default="4")
     parser.add_argument("--large-time-limit-s", default="600")
     parser.add_argument("--large-experiment-name", default="")
-    parser.add_argument("--large-benchmark-id", default="inventory_large_default")
-    parser.add_argument("--run-network-benchmark", choices=["true", "false"], default="false")
-    parser.add_argument("--network-product-count", default="80")
-    parser.add_argument("--network-source-count", default="12")
-    parser.add_argument("--network-dc-count", default="80")
-    parser.add_argument("--network-store-count", default="250")
-    parser.add_argument("--network-sources-per-dc", default="4")
-    parser.add_argument("--network-dcs-per-store", default="4")
-    parser.add_argument("--network-time-limit-s", default="600")
-    parser.add_argument("--network-experiment-name", default="")
-    parser.add_argument("--network-benchmark-id", default="network_default")
+    parser.add_argument("--large-benchmark-id", default="large_default")
     parser.add_argument(
         "--resource-key",
         choices=[
             "inventory_optimization_crash_course",
             "inventory_optimization_cuopt_gpu",
             "inventory_optimization_large_benchmark",
-            "inventory_optimization_network_benchmark",
         ],
         default="inventory_optimization_crash_course",
     )
@@ -103,20 +97,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         "seed": args.seed,
         "deploy_endpoint": args.deploy_endpoint,
         "run_large_benchmark": args.run_large_benchmark,
-        "large_sku_count": args.large_sku_count,
+        "large_product_count": args.large_product_count,
+        "large_source_count": args.large_source_count,
+        "large_dc_count": args.large_dc_count,
+        "large_store_count": args.large_store_count,
+        "large_sources_per_dc": args.large_sources_per_dc,
+        "large_dcs_per_store": args.large_dcs_per_store,
         "large_time_limit_s": args.large_time_limit_s,
         "large_experiment_name": args.large_experiment_name,
         "large_benchmark_id": args.large_benchmark_id,
-        "run_network_benchmark": args.run_network_benchmark,
-        "network_product_count": args.network_product_count,
-        "network_source_count": args.network_source_count,
-        "network_dc_count": args.network_dc_count,
-        "network_store_count": args.network_store_count,
-        "network_sources_per_dc": args.network_sources_per_dc,
-        "network_dcs_per_store": args.network_dcs_per_store,
-        "network_time_limit_s": args.network_time_limit_s,
-        "network_experiment_name": args.network_experiment_name,
-        "network_benchmark_id": args.network_benchmark_id,
     }
 
     _run(
