@@ -4,6 +4,7 @@ This repo walks through inventory optimization on Databricks as a tactical guide
 
 The main artifacts are Databricks source notebooks:
 
+- `introduction/or_ops_basics_with_mlflow.py` is a short starter notebook for the knapsack "hello world" OR-Ops pattern.
 - `notebooks/inventory_optimization_crash_course.py`
 - `notebooks/inventory_optimization_cuopt_gpu.py` is the NVIDIA cuOpt companion notebook for Databricks serverless GPU compute.
 
@@ -82,6 +83,7 @@ Use the large benchmark to answer “does cuOpt make sense on this kind of large
 
 ### Repo layout
 
+- `introduction/` contains the short knapsack OR-Ops introduction notebook and its `knapsack_solver.py` pyfunc helper.
 - `notebooks/inventory_optimization_crash_course.py` is the main tutorial notebook.
 - `notebooks/model_code/inventory_optimizer_model_template.py` is the checked-in MLflow Models From Code template.
 - `notebooks/model_code/cuopt_inventory_subprocess.py` isolates cuOpt solver execution for GPU notebook and serving runs.
