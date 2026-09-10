@@ -1206,7 +1206,7 @@ print(json.dumps(large_benchmark_summary, indent=2, sort_keys=True))
 # MAGIC | --- | --- | --- |
 # MAGIC | GPU Model Serving | Apps, what-if optimization, SQL `ai_query`, and endpoint-backed batch | Recommended default because the serving endpoint owns the GPU runtime and package environment |
 # MAGIC | Ray or persistent GPU actors | High-throughput batch solving where each worker can keep a CUDA context warm | Prefer this over launching a fresh cuOpt process per small group |
-# MAGIC | Spark `applyInPandas` on standard CPU/serverless workers | CPU solvers only | Do not use this path for cuOpt unless the Spark workers are GPU-compatible and have the cuOpt environment |
+# MAGIC | Spark `applyInPandas` | CPU solvers only | Even on serverless GPU compute the GPU is attached only to the driver; Spark executors run in standard CPU containers without `nvidia-smi`, CUDA, or `cuopt` installed, so cuOpt UDFs fail at import time. Use one of the other two patterns instead. |
 # MAGIC
 # MAGIC A small helper script ships with the MLflow model so native cuOpt failures surface as readable Python errors instead of crashing the notebook or serving worker.
 
